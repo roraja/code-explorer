@@ -45,13 +45,30 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- UI Layer ---
   const viewProvider = new CodeExplorerViewProvider(context.extensionUri, orchestrator);
 
-  context.subscriptions.push(vscode.window.registerWebviewViewProvider(VIEW_ID, viewProvider));
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(VIEW_ID, viewProvider, {
+      webviewOptions: { retainContextWhenHidden: true },
+    })
+  );
 
   // --- Commands ---
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.EXPLORE_SYMBOL, async (symbolOrUndefined) => {
       logger.info('Command: exploreSymbol invoked');
-      let symbol = symbolOrUndefined;
+
+      // The argument may be a SymbolInfo (from programmatic call),
+      // a Uri (from context menu), or undefined (from keybinding/command palette).
+      // Only use it if it looks like a SymbolInfo.
+      let symbol =
+        symbolOrUndefined &&
+        typeof symbolOrUndefined === 'object' &&
+        'name' in symbolOrUndefined &&
+        'kind' in symbolOrUndefined &&
+        'filePath' in symbolOrUndefined &&
+        'position' in symbolOrUndefined
+          ? symbolOrUndefined
+          : undefined;
+
       if (!symbol) {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {

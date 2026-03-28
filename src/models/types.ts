@@ -391,14 +391,11 @@ export interface CodeContext {
 // =====================
 
 /** Messages sent from the extension to the webview. */
-export type ExtensionToWebviewMessage =
-  | { type: 'openTab'; tab: TabState }
-  | { type: 'closeTab'; tabId: string }
-  | { type: 'focusTab'; tabId: string }
-  | { type: 'updateTab'; tabId: string; updates: Partial<TabState> }
-  | { type: 'analysisResult'; tabId: string; result: AnalysisResult }
-  | { type: 'analysisError'; tabId: string; error: string }
-  | { type: 'stalenessWarning'; tabId: string; changedFiles: string[] };
+export type ExtensionToWebviewMessage = {
+  type: 'setState';
+  tabs: TabState[];
+  activeTabId: string | null;
+};
 
 /** Messages sent from the webview to the extension. */
 export type WebviewToExtensionMessage =

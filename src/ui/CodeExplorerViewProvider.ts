@@ -1,17 +1,13 @@
 /**
  * Code Explorer — Sidebar Webview View Provider
  *
- * Manages the webview panel in the sidebar activity bar.
- * Serves the HTML/CSS/JS for the webview, handles bidirectional
- * message passing, and triggers analysis via the orchestrator.
+ * The extension side is the single source of truth for all tab state.
+ * On every mutation (tab open, close, analysis result, error) the full
+ * state snapshot is pushed to the webview via a single `setState` message.
+ * The webview is a pure renderer — it never owns state.
  */
 import * as vscode from 'vscode';
-import type {
-  SymbolInfo,
-  TabState,
-  ExtensionToWebviewMessage,
-  WebviewToExtensionMessage,
-} from '../models/types';
+import type { SymbolInfo, TabState, WebviewToExtensionMessage } from '../models/types';
 import type { AnalysisOrchestrator } from '../analysis/AnalysisOrchestrator';
 import { logger } from '../utils/logger';
 
@@ -19,11 +15,10 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'codeExplorer.sidebar';
 
   private _view?: vscode.WebviewView;
-  private _tabs: Map<string, TabState> = new Map();
+  private _tabs: TabState[] = [];
   private _activeTabId: string | null = null;
   private _tabCounter = 0;
   private _webviewReady = false;
-  private _pendingMessages: ExtensionToWebviewMessage[] = [];
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -44,6 +39,10 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this._extensionUri],
     };
 
+    webviewView.onDidChangeVisibility(() => {
+      logger.debug(`ViewProvider: visibility changed → ${webviewView.visible}`);
+    });
+
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
     webviewView.webview.onDidReceiveMessage((message: WebviewToExtensionMessage) => {
@@ -61,17 +60,38 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
    * Open a tab for a symbol and trigger analysis.
    */
   public async openTab(symbol: SymbolInfo): Promise<void> {
-    // Check if a tab already exists for this symbol
-    for (const [id, tab] of this._tabs) {
-      if (tab.symbol.name === symbol.name && tab.symbol.filePath === symbol.filePath) {
-        this._activeTabId = id;
-        this._postMessage({ type: 'focusTab', tabId: id });
-        logger.info(`Focused existing tab for ${symbol.kind} ${symbol.name}`);
+    logger.info(`ViewProvider.openTab: ${symbol.kind} "${symbol.name}" in ${symbol.filePath}`);
+
+    // Find existing tab for this symbol (match on name + filePath)
+    const existingIdx = this._tabs.findIndex(
+      (t) => t.symbol.name === symbol.name && t.symbol.filePath === symbol.filePath
+    );
+
+    if (existingIdx >= 0) {
+      const existing = this._tabs[existingIdx];
+
+      // If already has results, just focus it
+      if (existing.status === 'ready' && existing.analysis) {
+        this._activeTabId = existing.id;
+        logger.info(`ViewProvider.openTab: focusing existing ready tab ${existing.id}`);
+        this._pushState();
         return;
       }
+
+      // If loading, just focus
+      if (existing.status === 'loading') {
+        this._activeTabId = existing.id;
+        logger.info(`ViewProvider.openTab: focusing existing loading tab ${existing.id}`);
+        this._pushState();
+        return;
+      }
+
+      // If error/stale, remove it — will create fresh below
+      logger.info(`ViewProvider.openTab: removing ${existing.status} tab ${existing.id}`);
+      this._tabs.splice(existingIdx, 1);
     }
 
-    // Create new tab
+    // Create new tab in loading state
     const tabId = `tab-${++this._tabCounter}`;
     const tab: TabState = {
       id: tabId,
@@ -80,112 +100,116 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       analysis: null,
     };
 
-    this._tabs.set(tabId, tab);
+    this._tabs.push(tab);
     this._activeTabId = tabId;
-
-    this._postMessage({ type: 'openTab', tab });
-    logger.info(`Opened tab ${tabId} for ${symbol.kind} ${symbol.name}`);
+    this._pushState();
+    logger.info(`ViewProvider.openTab: created tab ${tabId}, triggering analysis`);
 
     // Trigger analysis
-    if (this._orchestrator) {
-      try {
-        const result = await this._orchestrator.analyzeSymbol(symbol);
-        tab.status = 'ready';
-        tab.analysis = result;
-        this._postMessage({ type: 'analysisResult', tabId, result });
-        logger.info(`Posted analysisResult to webview for ${symbol.name}`);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        tab.status = 'error';
-        tab.error = message;
-        this._postMessage({ type: 'analysisError', tabId, error: message });
-        logger.error(`Analysis failed for ${symbol.name}: ${message}`);
+    if (!this._orchestrator) {
+      logger.warn('ViewProvider.openTab: no orchestrator');
+      return;
+    }
+
+    try {
+      const result = await this._orchestrator.analyzeSymbol(symbol);
+
+      // Update the tab in place (it might still be in our array)
+      const t = this._tabs.find((x) => x.id === tabId);
+      if (t) {
+        t.status = 'ready';
+        t.analysis = result;
+        logger.info(`ViewProvider.openTab: analysis ready for tab ${tabId}`);
+      } else {
+        logger.warn(`ViewProvider.openTab: tab ${tabId} was removed during analysis`);
       }
+      this._pushState();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const t = this._tabs.find((x) => x.id === tabId);
+      if (t) {
+        t.status = 'error';
+        t.error = message;
+      }
+      this._pushState();
+      logger.error(`ViewProvider.openTab: analysis failed for ${symbol.name}: ${message}`);
     }
-  }
-
-  public postMessage(message: ExtensionToWebviewMessage): void {
-    this._postMessage(message);
   }
 
   /**
-   * Post a message to the webview.
-   * If the webview is not yet ready, queue the message and flush
-   * once the 'ready' signal arrives.
+   * Push the full state to the webview. This is the ONLY way
+   * state reaches the webview — no incremental messages.
    */
-  private _postMessage(message: ExtensionToWebviewMessage): void {
-    if (!this._view) {
-      logger.debug(`No webview view — queueing message: ${message.type}`);
-      this._pendingMessages.push(message);
+  private _pushState(): void {
+    const msg = {
+      type: 'setState' as const,
+      tabs: this._tabs,
+      activeTabId: this._activeTabId,
+    };
+
+    if (!this._view || !this._webviewReady) {
+      logger.debug(
+        `ViewProvider._pushState: deferred (view=${!!this._view} ready=${this._webviewReady}) ` +
+          `tabs=${this._tabs.length} active=${this._activeTabId}`
+      );
       return;
     }
 
-    if (!this._webviewReady) {
-      logger.debug(`Webview not ready — queueing message: ${message.type}`);
-      this._pendingMessages.push(message);
-      return;
-    }
-
-    this._view.webview.postMessage(message);
-  }
-
-  /**
-   * Flush all pending messages to the webview.
-   */
-  private _flushPendingMessages(): void {
-    if (!this._view || this._pendingMessages.length === 0) {
-      return;
-    }
-
-    logger.debug(`Flushing ${this._pendingMessages.length} pending messages to webview`);
-    for (const msg of this._pendingMessages) {
-      this._view.webview.postMessage(msg);
-    }
-    this._pendingMessages = [];
+    logger.debug(
+      `ViewProvider._pushState: sending ${this._tabs.length} tabs, active=${this._activeTabId}`
+    );
+    this._view.webview.postMessage(msg);
   }
 
   private _handleMessage(message: WebviewToExtensionMessage): void {
     switch (message.type) {
       case 'ready':
-        logger.info('Webview ready — flushing pending messages');
+        logger.info('ViewProvider: webview ready');
         this._webviewReady = true;
-        this._flushPendingMessages();
+        // Push current state so webview renders whatever we have
+        this._pushState();
         break;
+
       case 'tabClicked':
         logger.debug(`ViewProvider: tabClicked ${message.tabId}`);
         this._activeTabId = message.tabId;
-        this._postMessage({ type: 'focusTab', tabId: message.tabId });
+        this._pushState();
         break;
-      case 'tabClosed':
+
+      case 'tabClosed': {
         logger.debug(`ViewProvider: tabClosed ${message.tabId}`);
-        this._tabs.delete(message.tabId);
+        this._tabs = this._tabs.filter((t) => t.id !== message.tabId);
         if (this._activeTabId === message.tabId) {
-          const remaining = [...this._tabs.keys()];
-          this._activeTabId = remaining.length > 0 ? remaining[remaining.length - 1] : null;
+          this._activeTabId = this._tabs.length > 0 ? this._tabs[this._tabs.length - 1].id : null;
         }
-        this._postMessage({ type: 'closeTab', tabId: message.tabId });
+        this._pushState();
         break;
+      }
+
       case 'navigateToSource':
         logger.debug(
           `ViewProvider: navigateToSource ${message.filePath}:${message.line}:${message.character}`
         );
         this._navigateToSource(message.filePath, message.line, message.character);
         break;
+
       case 'refreshRequested': {
-        const tab = this._tabs.get(message.tabId);
+        const tab = this._tabs.find((t) => t.id === message.tabId);
         if (tab && this._orchestrator) {
-          logger.info(`Refreshing analysis for ${tab.symbol.name}`);
-          // Delete the old tab so openTab creates a fresh one
-          this._tabs.delete(message.tabId);
+          logger.info(`ViewProvider: refresh for ${tab.symbol.name}`);
+          // Remove old tab and re-analyze
+          this._tabs = this._tabs.filter((t) => t.id !== message.tabId);
           this.openTab(tab.symbol);
         }
         break;
       }
+
       case 'retryAnalysis': {
-        const retryTab = this._tabs.get(message.tabId);
-        if (retryTab) {
-          this._tabs.delete(message.tabId);
-          this.openTab(retryTab.symbol);
+        const tab = this._tabs.find((t) => t.id === message.tabId);
+        if (tab) {
+          logger.info(`ViewProvider: retry for ${tab.symbol.name}`);
+          this._tabs = this._tabs.filter((t) => t.id !== message.tabId);
+          this.openTab(tab.symbol);
         }
         break;
       }
@@ -203,7 +227,6 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       const uri = vscode.Uri.file(`${workspaceRoot}/${filePath}`);
-      // line from webview is 1-based, VS Code is 0-based
       const position = new vscode.Position(Math.max(0, line - 1), character);
       const doc = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(doc, {
@@ -214,8 +237,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         new vscode.Range(position, position),
         vscode.TextEditorRevealType.InCenter
       );
+      logger.debug(`ViewProvider: navigated to ${filePath}:${line}`);
     } catch (err) {
-      logger.error(`Failed to navigate: ${err}`);
+      logger.error(`ViewProvider: failed to navigate: ${err}`);
     }
   }
 

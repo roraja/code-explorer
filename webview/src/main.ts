@@ -1,8 +1,10 @@
 /**
  * Code Explorer — Webview Entry Point
  *
- * Renders the sidebar UI: tabs, analysis results, loading/error states.
- * Communicates with the extension host via message passing.
+ * Pure renderer. Receives full state from the extension via a single
+ * `setState` message and renders it. Never owns or mutates state —
+ * all mutations go through messages to the extension, which pushes
+ * back the updated state.
  */
 
 import './styles/main.css';
@@ -14,105 +16,38 @@ const vscode = (window as any).acquireVsCodeApi?.() ?? {
   setState: (_state: unknown) => {},
 };
 
-interface TabData {
+interface Tab {
   id: string;
-  symbolName: string;
-  symbolKind: string;
+  symbol: { name: string; kind: string; filePath: string };
   status: 'loading' | 'ready' | 'error' | 'stale';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   analysis: any;
   error?: string;
 }
 
-const state = {
-  tabs: [] as TabData[],
-  activeTabId: null as string | null,
-};
+let currentTabs: Tab[] = [];
+let currentActiveTabId: string | null = null;
+
+function log(msg: string): void {
+  console.log(`[CE] ${msg}`);
+}
 
 function init(): void {
+  log('init');
   render();
 
   window.addEventListener('message', (event) => {
     const msg = event.data;
-    switch (msg.type) {
-      case 'openTab':
-        addTab(msg.tab);
-        break;
-      case 'focusTab':
-        focusTab(msg.tabId);
-        break;
-      case 'closeTab':
-        removeTab(msg.tabId);
-        break;
-      case 'analysisResult':
-        updateTabResult(msg.tabId, msg.result);
-        break;
-      case 'analysisError':
-        updateTabError(msg.tabId, msg.error);
-        break;
-      case 'updateTab':
-        if (msg.updates?.status) {
-          const tab = state.tabs.find((t) => t.id === msg.tabId);
-          if (tab) {
-            tab.status = msg.updates.status;
-            render();
-          }
-        }
-        break;
+    if (msg.type === 'setState') {
+      currentTabs = msg.tabs || [];
+      currentActiveTabId = msg.activeTabId;
+      log(`setState: ${currentTabs.length} tabs, active=${currentActiveTabId}`);
+      render();
     }
   });
 
   vscode.postMessage({ type: 'ready' });
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function addTab(tabData: any): void {
-  const existing = state.tabs.find((t) => t.id === tabData.id);
-  if (!existing) {
-    state.tabs.push({
-      id: tabData.id,
-      symbolName: tabData.symbol.name,
-      symbolKind: tabData.symbol.kind,
-      status: tabData.status || 'loading',
-      analysis: tabData.analysis,
-      error: tabData.error,
-    });
-  }
-  state.activeTabId = tabData.id;
-  render();
-}
-
-function focusTab(tabId: string): void {
-  state.activeTabId = tabId;
-  render();
-}
-
-function removeTab(tabId: string): void {
-  state.tabs = state.tabs.filter((t) => t.id !== tabId);
-  if (state.activeTabId === tabId) {
-    state.activeTabId = state.tabs.length > 0 ? state.tabs[state.tabs.length - 1].id : null;
-  }
-  render();
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function updateTabResult(tabId: string, result: any): void {
-  const tab = state.tabs.find((t) => t.id === tabId);
-  if (tab) {
-    tab.status = 'ready';
-    tab.analysis = result;
-    tab.error = undefined;
-  }
-  render();
-}
-
-function updateTabError(tabId: string, error: string): void {
-  const tab = state.tabs.find((t) => t.id === tabId);
-  if (tab) {
-    tab.status = 'error';
-    tab.error = error;
-  }
-  render();
+  log('ready sent');
 }
 
 // =====================
@@ -125,12 +60,13 @@ function render(): void {
     return;
   }
 
-  if (state.tabs.length === 0) {
+  if (currentTabs.length === 0) {
     root.innerHTML = renderEmpty();
     return;
   }
 
-  const activeTab = state.tabs.find((t) => t.id === state.activeTabId) || state.tabs[0];
+  const activeTab = currentTabs.find((t) => t.id === currentActiveTabId) || currentTabs[0];
+
   root.innerHTML = renderTabBar() + renderContent(activeTab);
   attachListeners();
 }
@@ -148,10 +84,10 @@ function renderEmpty(): string {
 }
 
 function renderTabBar(): string {
-  const tabs = state.tabs
+  const tabs = currentTabs
     .map((tab) => {
-      const active = tab.id === state.activeTabId ? ' tab--active' : '';
-      const icon = kindIcon(tab.symbolKind);
+      const active = tab.id === currentActiveTabId ? ' tab--active' : '';
+      const icon = kindIcon(tab.symbol.kind);
       const statusDot =
         tab.status === 'loading'
           ? '<span class="tab__status tab__status--loading">⟳</span>'
@@ -160,7 +96,7 @@ function renderTabBar(): string {
             : '';
       return `<div class="tab${active}" data-tab-id="${tab.id}">
         <span class="tab__icon">${icon}</span>
-        <span class="tab__label">${esc(tab.symbolName)}</span>
+        <span class="tab__label">${esc(tab.symbol.name)}</span>
         ${statusDot}
         <span class="tab__close" data-close-id="${tab.id}">×</span>
       </div>`;
@@ -170,11 +106,11 @@ function renderTabBar(): string {
   return `<div class="tab-bar">${tabs}</div>`;
 }
 
-function renderContent(tab: TabData): string {
+function renderContent(tab: Tab): string {
   if (tab.status === 'loading') {
     return `<div class="loading-state">
       <div class="loading-state__spinner"></div>
-      <div class="loading-state__text">Analyzing ${esc(tab.symbolKind)} ${esc(tab.symbolName)}...</div>
+      <div class="loading-state__text">Analyzing ${esc(tab.symbol.kind)} ${esc(tab.symbol.name)}...</div>
     </div>`;
   }
 
@@ -193,16 +129,15 @@ function renderContent(tab: TabData): string {
   return renderAnalysis(tab);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function renderAnalysis(tab: TabData): string {
+function renderAnalysis(tab: Tab): string {
   const a = tab.analysis;
   const sections: string[] = [];
 
   // Header
   sections.push(`<div class="symbol-header">
-    <span class="symbol-header__icon">${kindIcon(a.symbol?.kind || tab.symbolKind)}</span>
-    <span class="symbol-header__kind">${esc(a.symbol?.kind || tab.symbolKind)}</span>
-    <span class="symbol-header__name">${esc(a.symbol?.name || tab.symbolName)}</span>
+    <span class="symbol-header__icon">${kindIcon(tab.symbol.kind)}</span>
+    <span class="symbol-header__kind">${esc(tab.symbol.kind)}</span>
+    <span class="symbol-header__name">${esc(tab.symbol.name)}</span>
   </div>`);
 
   // LLM badge
@@ -247,7 +182,7 @@ function renderAnalysis(tab: TabData): string {
     const items = a.callStacks
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((c: any) => {
-        const chain = c.chain || `${c.caller.name} → ${a.symbol?.name || tab.symbolName}`;
+        const chain = c.chain || `${c.caller.name} → ${tab.symbol.name}`;
         return `<li class="callstack-item">
           <strong>${esc(c.caller.name)}</strong>
           <span class="callstack-item__file">${esc(shortPath(c.caller.filePath))}:${c.caller.line}</span>
@@ -310,7 +245,6 @@ function renderSection(title: string, content: string): string {
 // =====================
 
 function attachListeners(): void {
-  // Tab clicks
   document.querySelectorAll('.tab').forEach((el) => {
     el.addEventListener('click', (e) => {
       const target = e.currentTarget as HTMLElement;
@@ -321,7 +255,6 @@ function attachListeners(): void {
     });
   });
 
-  // Tab close buttons
   document.querySelectorAll('.tab__close').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -333,7 +266,6 @@ function attachListeners(): void {
     });
   });
 
-  // Retry buttons
   document.querySelectorAll('.error-state__retry').forEach((el) => {
     el.addEventListener('click', () => {
       const tabId = (el as HTMLElement).dataset.retryId;
@@ -343,7 +275,6 @@ function attachListeners(): void {
     });
   });
 
-  // Usage row clicks (navigate to source)
   document.querySelectorAll('.usage-row').forEach((el) => {
     el.addEventListener('click', () => {
       const row = el as HTMLElement;

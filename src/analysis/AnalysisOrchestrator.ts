@@ -2,15 +2,16 @@
  * Code Explorer — Analysis Orchestrator
  *
  * Coordinates the full analysis pipeline:
- * 1. Run static analysis (references, call hierarchy, type hierarchy)
- * 2. Run LLM analysis (if available)
- * 3. Merge results
- * 4. Write to cache
+ * 1. Check disk cache — return immediately on hit
+ * 2. Run static analysis (references, call hierarchy, type hierarchy)
+ * 3. Run LLM analysis (if available)
+ * 4. Merge results
+ * 5. Write to cache
  */
 import * as vscode from 'vscode';
 import type { AnalysisResult, SymbolInfo } from '../models/types';
 import type { LLMProvider } from '../llm/LLMProvider';
-import type { CacheWriter } from '../cache/CacheWriter';
+import type { CacheStore } from '../cache/CacheStore';
 import { PromptBuilder } from '../llm/PromptBuilder';
 import { ResponseParser } from '../llm/ResponseParser';
 import { StaticAnalyzer } from './StaticAnalyzer';
@@ -24,17 +25,45 @@ export class AnalysisOrchestrator {
   constructor(
     private readonly _staticAnalyzer: StaticAnalyzer,
     private readonly _llmProvider: LLMProvider,
-    private readonly _cacheWriter: CacheWriter
+    private readonly _cache: CacheStore
   ) {}
 
   /**
-   * Full analysis pipeline for a symbol.
+   * Analyze a symbol. Returns cached result if available,
+   * otherwise runs the full static + LLM pipeline.
+   *
+   * @param force  Skip the cache and re-analyze from scratch.
    */
-  async analyzeSymbol(symbol: SymbolInfo): Promise<AnalysisResult> {
+  async analyzeSymbol(symbol: SymbolInfo, force = false): Promise<AnalysisResult> {
     const startTime = Date.now();
-    logger.info(`Analyzing ${symbol.kind} "${symbol.name}" in ${symbol.filePath}...`);
+    logger.info(
+      `Orchestrator.analyzeSymbol: ${symbol.kind} "${symbol.name}" in ${symbol.filePath}` +
+        (force ? ' (forced)' : '')
+    );
 
-    // 1. Static analysis (fast, always available)
+    // 1. Check disk cache (unless forced)
+    if (!force) {
+      try {
+        const cached = await this._cache.read(symbol);
+        if (cached && !cached.metadata.stale) {
+          const elapsed = Date.now() - startTime;
+          logger.info(
+            `Orchestrator: CACHE HIT for "${symbol.name}" in ${elapsed}ms ` +
+              `(analyzed ${cached.metadata.analyzedAt}, provider: ${cached.metadata.llmProvider || 'static'})`
+          );
+          this._onAnalysisComplete.fire(cached);
+          return cached;
+        }
+        if (cached) {
+          logger.info(`Orchestrator: cache is stale for "${symbol.name}", re-analyzing`);
+        }
+      } catch (err) {
+        logger.debug(`Orchestrator: cache read error: ${err}`);
+      }
+    }
+
+    // 2. Static analysis (fast, always available)
+    logger.info(`Orchestrator: running static analysis for "${symbol.name}"`);
     const [usages, callStacks, relationships, sourceCode] = await Promise.all([
       this._staticAnalyzer.findReferences(symbol),
       this._staticAnalyzer.buildCallHierarchy(symbol),
@@ -43,18 +72,18 @@ export class AnalysisOrchestrator {
     ]);
 
     logger.info(
-      `Static analysis: ${usages.length} refs, ${callStacks.length} callers, ` +
+      `Orchestrator: static analysis done — ${usages.length} refs, ${callStacks.length} callers, ` +
         `${relationships.length} relationships, source: ${sourceCode.length} chars`
     );
 
-    // 2. LLM analysis (slow, may be unavailable)
+    // 3. LLM analysis (slow, may be unavailable)
     let llmResult: Partial<AnalysisResult> = {};
     let llmProviderName: string | undefined;
 
     try {
       const available = await this._llmProvider.isAvailable();
       if (available && sourceCode) {
-        logger.info(`Running LLM analysis with provider: ${this._llmProvider.name}`);
+        logger.info(`Orchestrator: running LLM analysis with ${this._llmProvider.name}`);
 
         const prompt = PromptBuilder.build(symbol, sourceCode, usages);
         const rawResponse = await this._llmProvider.analyze({
@@ -64,32 +93,34 @@ export class AnalysisOrchestrator {
         });
 
         logger.debug(
-          `LLM raw response (first 500 chars): ${rawResponse.substring(0, 500).replace(/\n/g, '\\n')}`
+          `Orchestrator: LLM raw response (first 500 chars): ${rawResponse.substring(0, 500).replace(/\n/g, '\\n')}`
         );
 
         llmResult = ResponseParser.parse(rawResponse, symbol);
         llmProviderName = this._llmProvider.name;
 
         logger.info(
-          `LLM analysis complete — overview: ${(llmResult.overview || '').length} chars, ` +
+          `Orchestrator: LLM done — overview: ${(llmResult.overview || '').length} chars, ` +
             `keyMethods: ${llmResult.keyMethods?.length || 0}, ` +
             `dependencies: ${llmResult.dependencies?.length || 0}, ` +
             `issues: ${llmResult.potentialIssues?.length || 0}`
         );
       } else if (!available) {
-        logger.warn(`LLM provider "${this._llmProvider.name}" is not available, using static only`);
+        logger.warn(
+          `Orchestrator: LLM provider "${this._llmProvider.name}" not available, static only`
+        );
       } else {
-        logger.warn('No source code available for LLM analysis');
+        logger.warn('Orchestrator: no source code, skipping LLM');
       }
     } catch (err) {
-      logger.error(`LLM analysis failed: ${err}`);
-      // Continue with static-only results
+      logger.error(`Orchestrator: LLM analysis failed: ${err}`);
     }
 
-    // 3. Merge results
+    // 4. Merge results
     const result: AnalysisResult = {
       symbol,
-      overview: llmResult.overview || `${symbol.kind} **${symbol.name}** in \`${symbol.filePath}\``,
+      overview:
+        llmResult.overview || `${symbol.kind} **${symbol.name}** in \`${symbol.filePath}\``,
       callStacks,
       usages,
       dataFlow: llmResult.dataFlow || [],
@@ -109,17 +140,16 @@ export class AnalysisOrchestrator {
       },
     };
 
-    // 4. Write to cache
+    // 5. Write to cache
     try {
-      await this._cacheWriter.write(result);
+      await this._cache.write(result);
     } catch (err) {
-      logger.warn(`Failed to write cache: ${err}`);
-      // Non-fatal — analysis still returned to UI
+      logger.warn(`Orchestrator: cache write failed: ${err}`);
     }
 
     const elapsed = Date.now() - startTime;
     logger.info(
-      `Analysis complete for ${symbol.kind} "${symbol.name}" in ${elapsed}ms` +
+      `Orchestrator: analysis complete for "${symbol.name}" in ${elapsed}ms` +
         (llmProviderName ? ` (with ${llmProviderName})` : ' (static only)')
     );
 

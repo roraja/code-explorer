@@ -23,7 +23,15 @@ interface Tab {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   analysis: any;
   error?: string;
+  loadingStage?: string;
 }
+
+const LOADING_STAGE_LABELS: Record<string, string> = {
+  'cache-check': 'Checking cache\u2026',
+  'reading-source': 'Reading source code\u2026',
+  'llm-analyzing': 'Running LLM analysis\u2026',
+  'writing-cache': 'Saving to cache\u2026',
+};
 
 let currentTabs: Tab[] = [];
 let currentActiveTabId: string | null = null;
@@ -123,9 +131,13 @@ function renderTabBar(): string {
 
 function renderContent(tab: Tab): string {
   if (tab.status === 'loading') {
+    const stageLabel = tab.loadingStage
+      ? LOADING_STAGE_LABELS[tab.loadingStage] || tab.loadingStage
+      : 'Starting\u2026';
     return `<div class="loading-state">
       <div class="loading-state__spinner"></div>
-      <div class="loading-state__text">Analyzing ${esc(tab.symbol.kind)} ${esc(tab.symbol.name)}...</div>
+      <div class="loading-state__text">Analyzing ${esc(tab.symbol.kind)} ${esc(tab.symbol.name)}</div>
+      <div class="loading-state__stage">${esc(stageLabel)}</div>
     </div>`;
   }
 

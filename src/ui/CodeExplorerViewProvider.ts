@@ -107,6 +107,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       symbol,
       status: 'loading',
       analysis: null,
+      loadingStage: 'cache-check',
     };
 
     this._tabs.push(tab);
@@ -121,13 +122,20 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
     }
 
     try {
-      const result = await this._orchestrator.analyzeSymbol(symbol);
+      const result = await this._orchestrator.analyzeSymbol(symbol, false, (stage) => {
+        const t = this._tabs.find((x) => x.id === tabId);
+        if (t && t.status === 'loading') {
+          t.loadingStage = stage;
+          this._pushState();
+        }
+      });
 
       // Update the tab in place (it might still be in our array)
       const t = this._tabs.find((x) => x.id === tabId);
       if (t) {
         t.status = 'ready';
         t.analysis = result;
+        delete t.loadingStage;
         logger.info(`ViewProvider.openTab: analysis ready for tab ${tabId}`);
       } else {
         logger.warn(`ViewProvider.openTab: tab ${tabId} was removed during analysis`);

@@ -456,6 +456,24 @@ export interface CacheStats {
 // UI State
 // =====================
 
+/** Granular loading stage for progress display. */
+export type LoadingStage =
+  | 'cache-check'
+  | 'reading-source'
+  | 'llm-analyzing'
+  | 'writing-cache';
+
+/** Human-readable labels for each loading stage. */
+export const LOADING_STAGE_LABELS: Record<LoadingStage, string> = {
+  'cache-check': 'Checking cache…',
+  'reading-source': 'Reading source code…',
+  'llm-analyzing': 'Running LLM analysis…',
+  'writing-cache': 'Saving to cache…',
+};
+
+/** Progress callback for analysis stages. */
+export type AnalysisProgressCallback = (stage: LoadingStage) => void;
+
 /** State for a single tab in the sidebar. */
 export interface TabState {
   id: string;
@@ -463,6 +481,8 @@ export interface TabState {
   status: 'loading' | 'ready' | 'error' | 'stale';
   analysis: AnalysisResult | null;
   error?: string;
+  /** Current loading stage for granular progress display */
+  loadingStage?: LoadingStage;
 }
 
 /** Root state for the explorer sidebar. */

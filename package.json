@@ -105,15 +105,15 @@
       "properties": {
         "codeExplorer.llmProvider": {
           "type": "string",
-          "default": "mai-claude",
+          "default": "copilot-cli",
           "enum": [
-            "mai-claude",
             "copilot-cli",
+            "mai-claude",
             "none"
           ],
           "enumDescriptions": [
-            "Use mai-claude CLI for AI analysis",
-            "Use GitHub Copilot CLI for AI analysis",
+            "Use GitHub Copilot CLI for AI analysis (copilot --yolo -s)",
+            "Use mai-claude CLI for AI analysis (claude -p)",
             "Disable AI analysis (static analysis only)"
           ],
           "description": "LLM provider for deep code analysis."

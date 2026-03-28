@@ -15,12 +15,16 @@ export interface CLIRunOptions {
   args: string[];
   /** Data to write to stdin. */
   stdinData: string;
-  /** Timeout in milliseconds (default: 120000). */
+  /** Timeout in milliseconds (default: 900000 = 15 min). */
   timeoutMs?: number;
   /** Environment variable overrides — keys set to undefined are deleted. */
   envOverrides?: Record<string, string | undefined>;
   /** Label for log messages (e.g. 'mai-claude', 'copilot-cli'). */
   label: string;
+  /** Optional callback invoked with each stdout chunk as it arrives. */
+  onStdoutChunk?: (chunk: string) => void;
+  /** Optional callback invoked with each stderr chunk as it arrives. */
+  onStderrChunk?: (chunk: string) => void;
 }
 
 /**
@@ -31,7 +35,7 @@ export interface CLIRunOptions {
  * - Uses a `settled` guard to prevent double-resolve/reject.
  */
 export function runCLI(options: CLIRunOptions): Promise<string> {
-  const { command, args, stdinData, timeoutMs = 120_000, envOverrides, label } = options;
+  const { command, args, stdinData, timeoutMs = 900_000, envOverrides, label, onStdoutChunk, onStderrChunk } = options;
 
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
@@ -50,14 +54,27 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
+    const pid = child.pid;
+    logger.info(`${label}: spawned process PID=${pid}`);
+
     let stdout = '';
     let stderr = '';
     let settled = false;
+    const startTime = Date.now();
+
+    // Periodic "still waiting" log every 15 seconds
+    const waitingInterval = setInterval(() => {
+      if (!settled) {
+        const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+        logger.info(`${label}: Still waiting for agent to complete (PID=${pid}, ${elapsedSec}s elapsed)`);
+      }
+    }, 15_000);
 
     // Manual timeout since spawn doesn't support timeout option
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
+        clearInterval(waitingInterval);
         child.kill('SIGTERM');
         const err = new Error('Process timed out');
         (err as Error & { killed: boolean; signal: string }).killed = true;
@@ -67,17 +84,26 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
     }, timeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      if (onStdoutChunk) {
+        onStdoutChunk(text);
+      }
     });
 
     child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      stderr += text;
+      if (onStderrChunk) {
+        onStderrChunk(text);
+      }
     });
 
     child.on('error', (err: Error) => {
       if (!settled) {
         settled = true;
         clearTimeout(timer);
+        clearInterval(waitingInterval);
         reject(err);
       }
     });
@@ -88,6 +114,7 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
       }
       settled = true;
       clearTimeout(timer);
+      clearInterval(waitingInterval);
 
       if (signal) {
         const err = new Error(`Process killed by signal ${signal}`);

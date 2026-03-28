@@ -310,4 +310,182 @@ A function.
       assert.strictEqual(result.functionOutput, undefined);
     });
   });
+
+  suite('parse — data flow', () => {
+    test('extracts data flow entries from json:data_flow block', () => {
+      const raw = `### Overview
+A variable.
+
+\`\`\`json:data_flow
+[
+  { "type": "created", "filePath": "src/main.ts", "line": 10, "description": "Created from constructor" },
+  { "type": "modified", "filePath": "src/main.ts", "line": 20, "description": "Property .status set" },
+  { "type": "passed", "filePath": "src/main.ts", "line": 30, "description": "Passed to validate()" }
+]
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.ok(result.dataFlow);
+      assert.strictEqual(result.dataFlow!.length, 3);
+      assert.strictEqual(result.dataFlow![0].type, 'created');
+      assert.strictEqual(result.dataFlow![0].filePath, 'src/main.ts');
+      assert.strictEqual(result.dataFlow![0].line, 10);
+      assert.strictEqual(result.dataFlow![1].type, 'modified');
+      assert.strictEqual(result.dataFlow![2].type, 'passed');
+    });
+
+    test('returns empty array when no json:data_flow block exists', () => {
+      const raw = `### Overview\nA function.\n`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.ok(Array.isArray(result.dataFlow));
+      assert.strictEqual(result.dataFlow!.length, 0);
+    });
+
+    test('handles malformed JSON gracefully', () => {
+      const raw = `\`\`\`json:data_flow\n{ broken }\n\`\`\`\n`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.ok(Array.isArray(result.dataFlow));
+      assert.strictEqual(result.dataFlow!.length, 0);
+    });
+  });
+
+  suite('parse — variable lifecycle', () => {
+    test('extracts variable lifecycle from json:variable_lifecycle block', () => {
+      const raw = `### Overview
+A variable.
+
+\`\`\`json:variable_lifecycle
+{
+  "declaration": "Declared as const at line 15",
+  "initialization": "Initialized from database query",
+  "mutations": ["Line 20: status = active", "Line 25: lastLogin = new Date()"],
+  "consumption": ["Line 30: passed to validate()"],
+  "scopeAndLifetime": "Function-scoped"
+}
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.ok(result.variableLifecycle);
+      assert.strictEqual(result.variableLifecycle!.declaration, 'Declared as const at line 15');
+      assert.strictEqual(result.variableLifecycle!.initialization, 'Initialized from database query');
+      assert.strictEqual(result.variableLifecycle!.mutations.length, 2);
+      assert.strictEqual(result.variableLifecycle!.consumption.length, 1);
+      assert.strictEqual(result.variableLifecycle!.scopeAndLifetime, 'Function-scoped');
+    });
+
+    test('returns undefined when no lifecycle data exists', () => {
+      const raw = `### Overview\nA function.\n`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.strictEqual(result.variableLifecycle, undefined);
+    });
+  });
+
+  suite('parse — class members', () => {
+    test('extracts class members from json:class_members block', () => {
+      const raw = `### Overview
+A class.
+
+\`\`\`json:class_members
+[
+  {
+    "name": "_cache",
+    "memberKind": "field",
+    "typeName": "Map<string, Result>",
+    "visibility": "private",
+    "isStatic": false,
+    "description": "In-memory cache",
+    "line": 15
+  },
+  {
+    "name": "analyze",
+    "memberKind": "method",
+    "typeName": "() => Promise<void>",
+    "visibility": "public",
+    "isStatic": false,
+    "description": "Main analysis method",
+    "line": 42
+  }
+]
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.ok(result.classMembers);
+      assert.strictEqual(result.classMembers!.length, 2);
+
+      const field = result.classMembers![0];
+      assert.strictEqual(field.name, '_cache');
+      assert.strictEqual(field.memberKind, 'field');
+      assert.strictEqual(field.visibility, 'private');
+      assert.strictEqual(field.isStatic, false);
+      assert.strictEqual(field.line, 15);
+
+      const method = result.classMembers![1];
+      assert.strictEqual(method.name, 'analyze');
+      assert.strictEqual(method.memberKind, 'method');
+      assert.strictEqual(method.visibility, 'public');
+    });
+
+    test('returns undefined when no json:class_members block exists', () => {
+      const raw = `### Overview\nA function.\n`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.strictEqual(result.classMembers, undefined);
+    });
+
+    test('defaults memberKind and visibility for missing fields', () => {
+      const raw = `\`\`\`json:class_members
+[
+  { "name": "foo", "typeName": "string", "description": "a field" }
+]
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.ok(result.classMembers);
+      assert.strictEqual(result.classMembers![0].memberKind, 'field');
+      assert.strictEqual(result.classMembers![0].visibility, 'public');
+      assert.strictEqual(result.classMembers![0].isStatic, false);
+    });
+  });
+
+  suite('parse — member access', () => {
+    test('extracts member access patterns from json:member_access block', () => {
+      const raw = `### Overview
+A class.
+
+\`\`\`json:member_access
+[
+  {
+    "memberName": "_cache",
+    "readBy": ["analyze", "getCached"],
+    "writtenBy": ["analyze", "clear"],
+    "externalAccess": false
+  },
+  {
+    "memberName": "status",
+    "readBy": ["getStatus"],
+    "writtenBy": ["setStatus"],
+    "externalAccess": true
+  }
+]
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.ok(result.memberAccess);
+      assert.strictEqual(result.memberAccess!.length, 2);
+
+      const cache = result.memberAccess![0];
+      assert.strictEqual(cache.memberName, '_cache');
+      assert.deepStrictEqual(cache.readBy, ['analyze', 'getCached']);
+      assert.deepStrictEqual(cache.writtenBy, ['analyze', 'clear']);
+      assert.strictEqual(cache.externalAccess, false);
+
+      const status = result.memberAccess![1];
+      assert.strictEqual(status.externalAccess, true);
+    });
+
+    test('returns undefined when no json:member_access block exists', () => {
+      const raw = `### Overview\nA function.\n`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.strictEqual(result.memberAccess, undefined);
+    });
+  });
 });

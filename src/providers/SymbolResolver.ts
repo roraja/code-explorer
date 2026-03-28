@@ -39,13 +39,21 @@ export class SymbolResolver {
 
     // Find the most specific symbol containing the position
     const match = this._findDeepest(symbols, position);
+
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+    const relPath = path.relative(workspaceRoot, document.fileName);
+
     if (!match) {
-      // Fallback: use the word at the cursor
+      // Fallback: try definition provider for local variables not in document symbols
+      const defResult = await this._resolveViaDefinition(document, position, relPath, symbols);
+      if (defResult) {
+        return defResult;
+      }
+
+      // Last resort: use the word at the cursor
       const wordRange = document.getWordRangeAtPosition(position);
       if (wordRange) {
         const word = document.getText(wordRange);
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-        const relPath = path.relative(workspaceRoot, document.fileName);
         logger.info(
           `SymbolResolver: no symbol match, falling back to word "${word}" at ${relPath}:${position.line}`
         );
@@ -61,15 +69,29 @@ export class SymbolResolver {
       return null;
     }
 
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-    const relPath = path.relative(workspaceRoot, document.fileName);
+    const matchedKind = this._mapSymbolKind(match.symbol.kind);
+
+    // If the matched symbol is a function/method/class but the cursor is on a word
+    // inside it (not on its name), the user may be clicking on a local variable.
+    // Try definition provider to resolve the exact token.
+    if (
+      (matchedKind === 'function' || matchedKind === 'method' || matchedKind === 'class') &&
+      !match.symbol.selectionRange.contains(position)
+    ) {
+      const localResult = await this._resolveViaDefinition(
+        document, position, relPath, symbols
+      );
+      if (localResult) {
+        return localResult;
+      }
+    }
 
     // Build the scope chain: names of all ancestors (excluding the symbol itself)
     const scopeChain = match.ancestors.map((a) => a.name);
 
     const info: SymbolInfo = {
       name: match.symbol.name,
-      kind: this._mapSymbolKind(match.symbol.kind),
+      kind: matchedKind,
       filePath: relPath,
       position: {
         line: match.symbol.selectionRange.start.line,
@@ -123,6 +145,110 @@ export class SymbolResolver {
       }
     }
     return null;
+  }
+
+  /**
+   * Try to resolve a local variable or identifier via the definition provider.
+   * This catches local variables, parameters, and other tokens that don't
+   * appear as DocumentSymbol children.
+   */
+  private async _resolveViaDefinition(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    _relPath: string,
+    allSymbols: vscode.DocumentSymbol[]
+  ): Promise<SymbolInfo | null> {
+    const wordRange = document.getWordRangeAtPosition(position);
+    if (!wordRange) {
+      return null;
+    }
+
+    const word = document.getText(wordRange);
+    try {
+      const definitions = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
+        'vscode.executeDefinitionProvider',
+        document.uri,
+        position
+      );
+
+      if (!definitions || definitions.length === 0) {
+        return null;
+      }
+
+      // Use the first definition
+      const def = definitions[0];
+      const defUri = 'targetUri' in def ? def.targetUri : def.uri;
+      const defRange = 'targetRange' in def ? def.targetRange : def.range;
+
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+      const defRelPath = path.relative(workspaceRoot, defUri.fsPath);
+
+      // Build scope chain from enclosing symbols at the definition site
+      const scopeChain = this._buildScopeChainForPosition(
+        allSymbols,
+        defRange.start
+      );
+
+      // Determine kind: if it's defined inside a class, it's a property;
+      // if inside a function, it's a variable.
+      let kind: SymbolKindType = 'variable';
+      if (scopeChain.length > 0) {
+        const parentScope = this._findDeepest(allSymbols, defRange.start);
+        if (parentScope) {
+          const parentKind = this._mapSymbolKind(parentScope.symbol.kind);
+          if (parentKind === 'class' || parentKind === 'interface') {
+            kind = 'property';
+          }
+        }
+      }
+
+      const info: SymbolInfo = {
+        name: word,
+        kind,
+        filePath: defRelPath,
+        position: {
+          line: defRange.start.line,
+          character: defRange.start.character,
+        },
+        range: {
+          start: { line: defRange.start.line, character: defRange.start.character },
+          end: { line: defRange.end.line, character: defRange.end.character },
+        },
+        containerName: scopeChain.length > 0 ? scopeChain[scopeChain.length - 1] : undefined,
+        scopeChain,
+      };
+
+      logger.info(
+        `Resolved via definition provider: ${info.kind} "${info.name}" at ${info.filePath}:${info.position.line}` +
+          (scopeChain.length > 0 ? ` scope=[${scopeChain.join('.')}]` : '')
+      );
+      return info;
+    } catch (err) {
+      logger.debug(`SymbolResolver._resolveViaDefinition: failed for "${word}": ${err}`);
+      return null;
+    }
+  }
+
+  /**
+   * Build a scope chain (ancestor names) for a given position in the symbol tree.
+   */
+  private _buildScopeChainForPosition(
+    symbols: vscode.DocumentSymbol[],
+    position: vscode.Position,
+    chain: string[] = []
+  ): string[] {
+    for (const sym of symbols) {
+      if (sym.range.contains(position)) {
+        const childChain = this._buildScopeChainForPosition(
+          sym.children,
+          position,
+          [...chain, sym.name]
+        );
+        // Return the deepest chain found
+        return childChain.length > chain.length ? childChain : [...chain, sym.name];
+      }
+    }
+    return chain;
   }
 
   /**

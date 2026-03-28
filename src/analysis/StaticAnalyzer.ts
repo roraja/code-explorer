@@ -255,4 +255,80 @@ export class StaticAnalyzer {
       return '';
     }
   }
+
+  /**
+   * Read the source code of the containing scope (function/class) for a
+   * variable or property symbol. Returns the full body of the enclosing
+   * function or class so the LLM has context about how the symbol is used.
+   */
+  async readContainingScopeSource(symbol: SymbolInfo): Promise<string> {
+    logger.debug(
+      `StaticAnalyzer.readContainingScopeSource: ${symbol.kind} "${symbol.name}" in ${symbol.filePath}`
+    );
+    try {
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceRoot) {
+        return '';
+      }
+
+      const uri = vscode.Uri.file(path.join(workspaceRoot, symbol.filePath));
+      const doc = await vscode.workspace.openTextDocument(uri);
+
+      // Use scope chain to find the containing symbol in document symbols
+      if (symbol.scopeChain && symbol.scopeChain.length > 0) {
+        const docSymbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+          'vscode.executeDocumentSymbolProvider',
+          uri
+        );
+
+        if (docSymbols) {
+          const container = this._findContainerByName(
+            docSymbols,
+            symbol.scopeChain[symbol.scopeChain.length - 1]
+          );
+          if (container) {
+            const range = container.range;
+            const text = doc.getText(
+              new vscode.Range(
+                range.start.line, range.start.character,
+                range.end.line, range.end.character
+              )
+            );
+            logger.debug(
+              `StaticAnalyzer.readContainingScopeSource: read ${text.length} chars from container "${container.name}"`
+            );
+            return text;
+          }
+        }
+      }
+
+      // Fallback: read ~100 lines around the symbol
+      const startLine = Math.max(0, symbol.position.line - 20);
+      const endLine = Math.min(doc.lineCount - 1, symbol.position.line + 80);
+      const range = new vscode.Range(startLine, 0, endLine, doc.lineAt(endLine).text.length);
+      return doc.getText(range);
+    } catch (err) {
+      logger.warn(`Failed to read containing scope for ${symbol.name}: ${err}`);
+      return '';
+    }
+  }
+
+  /**
+   * Find a document symbol by name within a tree (breadth-first).
+   */
+  private _findContainerByName(
+    symbols: vscode.DocumentSymbol[],
+    name: string
+  ): vscode.DocumentSymbol | null {
+    for (const sym of symbols) {
+      if (sym.name === name) {
+        return sym;
+      }
+      const child = this._findContainerByName(sym.children || [], name);
+      if (child) {
+        return child;
+      }
+    }
+    return null;
+  }
 }

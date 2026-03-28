@@ -47,6 +47,8 @@ export class MaiClaudeProvider implements LLMProvider {
         stdinData: request.prompt,
         label: 'mai-claude',
         envOverrides: { CLAUDECODE: undefined },
+        onStdoutChunk: (chunk) => logger.logLLMChunk(chunk),
+        onStderrChunk: (chunk) => logger.logLLMChunk(`[stderr] ${chunk}`),
       });
 
       const elapsed = Date.now() - startTime;

@@ -23,6 +23,9 @@ import {
   type ProviderCapabilities,
   type CodeContext,
   type QueuedAnalysis,
+  type ClassMemberInfo,
+  type MemberAccessInfo,
+  type VariableLifecycle,
 } from '../../../src/models/types';
 
 suite('Data Models', () => {
@@ -339,6 +342,94 @@ suite('Data Models', () => {
       };
       assert.strictEqual(analysis.priority, 10);
       assert.strictEqual(analysis.retryCount, 0);
+    });
+  });
+
+  suite('ClassMemberInfo', () => {
+    test('can represent a class field', () => {
+      const member: ClassMemberInfo = {
+        name: '_cache',
+        memberKind: 'field',
+        typeName: 'Map<string, any>',
+        visibility: 'private',
+        isStatic: false,
+        description: 'In-memory cache',
+        line: 15,
+      };
+      assert.strictEqual(member.name, '_cache');
+      assert.strictEqual(member.memberKind, 'field');
+      assert.strictEqual(member.visibility, 'private');
+      assert.strictEqual(member.isStatic, false);
+    });
+
+    test('can represent a static method', () => {
+      const member: ClassMemberInfo = {
+        name: 'getInstance',
+        memberKind: 'method',
+        typeName: '() => Singleton',
+        visibility: 'public',
+        isStatic: true,
+        description: 'Returns the singleton instance',
+      };
+      assert.strictEqual(member.isStatic, true);
+      assert.strictEqual(member.memberKind, 'method');
+    });
+
+    test('supports all member kinds', () => {
+      const kinds: ClassMemberInfo['memberKind'][] = [
+        'field', 'method', 'property', 'constructor', 'getter', 'setter',
+      ];
+      for (const kind of kinds) {
+        const member: ClassMemberInfo = {
+          name: 'test',
+          memberKind: kind,
+          typeName: 'any',
+          visibility: 'public',
+          isStatic: false,
+          description: `A ${kind}`,
+        };
+        assert.strictEqual(member.memberKind, kind);
+      }
+    });
+  });
+
+  suite('MemberAccessInfo', () => {
+    test('can track read and write access', () => {
+      const access: MemberAccessInfo = {
+        memberName: '_data',
+        readBy: ['getData', 'toString'],
+        writtenBy: ['setData', 'constructor'],
+        externalAccess: false,
+      };
+      assert.strictEqual(access.memberName, '_data');
+      assert.strictEqual(access.readBy.length, 2);
+      assert.strictEqual(access.writtenBy.length, 2);
+      assert.strictEqual(access.externalAccess, false);
+    });
+
+    test('can indicate external access', () => {
+      const access: MemberAccessInfo = {
+        memberName: 'status',
+        readBy: ['getStatus'],
+        writtenBy: [],
+        externalAccess: true,
+      };
+      assert.strictEqual(access.externalAccess, true);
+    });
+  });
+
+  suite('VariableLifecycle', () => {
+    test('can represent a complete lifecycle', () => {
+      const lifecycle: VariableLifecycle = {
+        declaration: 'const at line 10',
+        initialization: 'From constructor',
+        mutations: ['Line 20: push()', 'Line 30: splice()'],
+        consumption: ['Line 40: passed to validate()'],
+        scopeAndLifetime: 'Function-scoped',
+      };
+      assert.strictEqual(lifecycle.declaration, 'const at line 10');
+      assert.strictEqual(lifecycle.mutations.length, 2);
+      assert.strictEqual(lifecycle.consumption.length, 1);
     });
   });
 });

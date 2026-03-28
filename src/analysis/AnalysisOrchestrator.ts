@@ -8,7 +8,7 @@
  * 4. Write to cache
  */
 import * as vscode from 'vscode';
-import type { AnalysisResult, AnalysisProgressCallback, SymbolInfo } from '../models/types';
+import type { AnalysisResult, AnalysisProgressCallback, SymbolInfo, RelatedSymbolAnalysis } from '../models/types';
 import type { LLMProvider } from '../llm/LLMProvider';
 import type { CacheStore } from '../cache/CacheStore';
 import { PromptBuilder } from '../llm/PromptBuilder';
@@ -137,6 +137,19 @@ export class AnalysisOrchestrator {
     );
     logger.logLLMStep(`Source code: ${sourceCode.length} chars`);
 
+    // 2b. For variables/properties, also read the containing scope source
+    let containingScopeSource: string | undefined;
+    if (symbol.kind === 'variable' || symbol.kind === 'property' || symbol.kind === 'parameter') {
+      logger.logLLMStep('Reading containing scope source for variable/property analysis...');
+      containingScopeSource = await withTimeout(
+        this._staticAnalyzer.readContainingScopeSource(symbol),
+        STATIC_ANALYSIS_TIMEOUT_MS,
+        '',
+        'readContainingScopeSource'
+      );
+      logger.logLLMStep(`Containing scope source: ${containingScopeSource ? containingScopeSource.length : 0} chars`);
+    }
+
     // 3. LLM analysis
     onProgress?.('llm-analyzing');
     let llmResult: Partial<AnalysisResult> = {};
@@ -146,14 +159,18 @@ export class AnalysisOrchestrator {
       logger.logLLMStep(`Checking if LLM provider "${this._llmProvider.name}" is available...`);
       const available = await this._llmProvider.isAvailable();
       if (available && sourceCode) {
-        logger.logLLMStep(`LLM provider available — building prompt...`);
+        logger.logLLMStep(`LLM provider available — building prompt (${symbol.kind} strategy)...`);
         logger.info(`Orchestrator: running LLM analysis with ${this._llmProvider.name}`);
 
-        const prompt = PromptBuilder.build(symbol, sourceCode);
+        const prompt = PromptBuilder.build(symbol, sourceCode, containingScopeSource);
         logger.logLLMStep(`Prompt built (${prompt.length} chars), sending to ${this._llmProvider.name}...`);
 
         // Log the prompt before sending
         logger.logLLMInput(prompt);
+
+        // Start a real-time output section so streamed chunks appear under a heading
+        logger.logLLMStep('Streaming real-time output below...');
+        logger.logLLMChunk('\n---\n\n## Real-time Output\n\n```\n');
 
         const rawResponse = await this._llmProvider.analyze({
           prompt,
@@ -162,6 +179,9 @@ export class AnalysisOrchestrator {
         });
 
         logger.logLLMStep(`Response received (${rawResponse.length} chars), parsing...`);
+
+        // Close the real-time output code fence
+        logger.logLLMChunk('\n```\n\n');
 
         logger.debug(
           `Orchestrator: LLM raw response (first 500 chars): ${rawResponse.substring(0, 500).replace(/\n/g, '\\n')}`
@@ -175,6 +195,8 @@ export class AnalysisOrchestrator {
             `keyMethods: ${llmResult.keyMethods?.length || 0}, ` +
             `steps: ${llmResult.functionSteps?.length || 0}, ` +
             `subFunctions: ${llmResult.subFunctions?.length || 0}, ` +
+            `classMembers: ${llmResult.classMembers?.length || 0}, ` +
+            `dataFlow: ${llmResult.dataFlow?.length || 0}, ` +
             `issues: ${llmResult.potentialIssues?.length || 0}`
         );
 
@@ -211,6 +233,8 @@ export class AnalysisOrchestrator {
       subFunctions: llmResult.subFunctions,
       functionInputs: llmResult.functionInputs,
       functionOutput: llmResult.functionOutput,
+      classMembers: llmResult.classMembers,
+      memberAccess: llmResult.memberAccess,
       metadata: {
         analyzedAt: new Date().toISOString(),
         sourceHash: '',
@@ -227,6 +251,12 @@ export class AnalysisOrchestrator {
     try {
       await this._cache.write(result);
       logger.logLLMStep('Cache write successful');
+
+      // Pre-cache related symbols if any were discovered
+      if (result.relatedSymbols && result.relatedSymbols.length > 0) {
+        logger.logLLMStep(`Pre-caching ${result.relatedSymbols.length} related symbols...`);
+        await this._cacheRelatedSymbols(result.relatedSymbols, llmProviderName);
+      }
     } catch (err) {
       logger.logLLMStep(`Cache write FAILED: ${err}`);
       logger.warn(`Orchestrator: cache write failed: ${err}`);

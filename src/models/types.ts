@@ -127,6 +127,10 @@ export interface AnalysisResult {
   functionOutput?: FunctionOutputInfo;
   /** Brief LLM analyses of related symbols for pre-caching */
   relatedSymbols?: RelatedSymbolAnalysis[];
+  /** Class members (for class/struct analysis) */
+  classMembers?: ClassMemberInfo[];
+  /** Member access patterns (for class/struct analysis) */
+  memberAccess?: MemberAccessInfo[];
   /** Metadata for cache management */
   metadata: AnalysisMetadata;
 }
@@ -291,6 +295,40 @@ export interface VariableLifecycle {
   consumption: string[];
   /** Scope and garbage collection eligibility */
   scopeAndLifetime: string;
+}
+
+/**
+ * A member of a class or data structure (for class-level analysis).
+ */
+export interface ClassMemberInfo {
+  /** Member name */
+  name: string;
+  /** Member kind (field, method, property, constructor) */
+  memberKind: 'field' | 'method' | 'property' | 'constructor' | 'getter' | 'setter';
+  /** Type annotation */
+  typeName: string;
+  /** Visibility */
+  visibility: 'public' | 'private' | 'protected' | 'internal';
+  /** Whether this member is static */
+  isStatic: boolean;
+  /** Brief description */
+  description: string;
+  /** Line number in the source file */
+  line?: number;
+}
+
+/**
+ * Tracks which methods read/write a specific class member.
+ */
+export interface MemberAccessInfo {
+  /** Name of the member being tracked */
+  memberName: string;
+  /** Methods that read this member */
+  readBy: string[];
+  /** Methods that write/mutate this member */
+  writtenBy: string[];
+  /** Whether this member is accessed from outside the class */
+  externalAccess: boolean;
 }
 
 /**

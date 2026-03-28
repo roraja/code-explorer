@@ -268,13 +268,29 @@ export const logger = {
     }
     try {
       const section =
-        `---\n\n` +
+        `---
+\n` +
         `## Output (Response)\n\n` +
         response + '\n';
       fs.appendFileSync(_activeLLMLogFile, section, 'utf-8');
       _activeLLMLogFile = undefined; // done with this log
     } catch {
       _activeLLMLogFile = undefined;
+    }
+  },
+
+  /**
+   * Append a raw stdout chunk to the active LLM log file in real time.
+   * Used to capture streaming CLI output as it arrives.
+   */
+  logLLMChunk(chunk: string): void {
+    if (!_activeLLMLogFile) {
+      return;
+    }
+    try {
+      fs.appendFileSync(_activeLLMLogFile, chunk, 'utf-8');
+    } catch {
+      // silently skip
     }
   },
 };

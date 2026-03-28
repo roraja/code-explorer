@@ -4,7 +4,7 @@
  * Parses LLM markdown responses into structured AnalysisResult fields.
  * Handles inconsistent formatting gracefully.
  */
-import type { AnalysisResult, SymbolInfo, CallStackEntry, UsageEntry, RelatedSymbolAnalysis, FunctionStep, SubFunctionInfo, FunctionInputParam, FunctionOutputInfo } from '../models/types';
+import type { AnalysisResult, SymbolInfo, CallStackEntry, UsageEntry, RelatedSymbolAnalysis, FunctionStep, SubFunctionInfo, FunctionInputParam, FunctionOutputInfo, DataFlowEntry, VariableLifecycle, ClassMemberInfo, MemberAccessInfo } from '../models/types';
 import { logger } from '../utils/logger';
 
 /** Shape of a single caller entry in the LLM's json:callers block. */
@@ -55,26 +55,39 @@ export class ResponseParser {
     const functionOutput = this._parseFunctionOutput(raw);
     logger.info(`ResponseParser: parsed function output: ${functionOutput ? functionOutput.typeName : 'none'}`);
 
+    // Parse data flow from json:data_flow block
+    const dataFlow = this._parseDataFlow(raw);
+    logger.info(`ResponseParser: parsed ${dataFlow.length} data flow entries`);
+
+    // Parse variable lifecycle from json:variable_lifecycle block
+    const variableLifecycle = this._parseVariableLifecycle(raw, sections);
+    logger.info(`ResponseParser: parsed variable lifecycle: ${variableLifecycle ? 'yes' : 'no'}`);
+
+    // Parse class members from json:class_members block
+    const classMembers = this._parseClassMembers(raw);
+    logger.info(`ResponseParser: parsed ${classMembers.length} class members`);
+
+    // Parse member access patterns from json:member_access block
+    const memberAccess = this._parseMemberAccess(raw);
+    logger.info(`ResponseParser: parsed ${memberAccess.length} member access patterns`);
+
     return {
       overview: sections['overview'] || sections['purpose'] || sections['summary'] || '',
       keyMethods: this._parseList(sections['key methods'] || sections['key points']),
       callStacks,
       usages,
+      dataFlow: dataFlow.length > 0 ? dataFlow : [],
       relatedSymbols,
       functionSteps: functionSteps.length > 0 ? functionSteps : undefined,
       subFunctions: subFunctions.length > 0 ? subFunctions : undefined,
       functionInputs: functionInputs.length > 0 ? functionInputs : undefined,
       functionOutput: functionOutput || undefined,
+      classMembers: classMembers.length > 0 ? classMembers : undefined,
+      memberAccess: memberAccess.length > 0 ? memberAccess : undefined,
       dependencies: this._parseList(sections['dependencies']),
       usagePattern: sections['usage pattern'] || sections['usage'] || '',
       potentialIssues: this._parseList(sections['potential issues'] || sections['issues']),
-      variableLifecycle: {
-        declaration: sections['declaration'] || '',
-        initialization: sections['initialization'] || '',
-        mutations: this._parseList(sections['mutations']),
-        consumption: this._parseList(sections['consumption']),
-        scopeAndLifetime: sections['scope & lifetime'] || sections['scope'] || '',
-      },
+      variableLifecycle: variableLifecycle || undefined,
     };
   }
 
@@ -312,6 +325,149 @@ export class ResponseParser {
       return results;
     } catch (err) {
       logger.warn(`ResponseParser._parseRelatedSymbols: JSON parse error: ${err}`);
+      return [];
+    }
+  }
+
+  /**
+   * Extract the ```json:data_flow ... ``` fenced block and parse into DataFlowEntry[].
+   */
+  private static _parseDataFlow(raw: string): DataFlowEntry[] {
+    const match = raw.match(/```json:data_flow\s*\n([\s\S]*?)\n\s*```/);
+    if (!match) {
+      logger.debug('ResponseParser._parseDataFlow: no json:data_flow block found');
+      return [];
+    }
+
+    try {
+      const entries: unknown[] = JSON.parse(match[1]);
+      if (!Array.isArray(entries)) {
+        return [];
+      }
+
+      const validTypes = new Set(['created', 'assigned', 'read', 'modified', 'consumed', 'returned', 'passed']);
+      return entries
+        .filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null)
+        .filter((e) => typeof e['type'] === 'string' && typeof e['description'] === 'string')
+        .map((e) => ({
+          type: (validTypes.has(e['type'] as string) ? e['type'] : 'read') as DataFlowEntry['type'],
+          filePath: typeof e['filePath'] === 'string' ? e['filePath'] : '',
+          line: typeof e['line'] === 'number' ? e['line'] : 0,
+          description: e['description'] as string,
+        }));
+    } catch (err) {
+      logger.warn(`ResponseParser._parseDataFlow: JSON parse error: ${err}`);
+      return [];
+    }
+  }
+
+  /**
+   * Extract the ```json:variable_lifecycle ... ``` fenced block and parse into VariableLifecycle.
+   * Falls back to extracting from markdown sections if no JSON block is found.
+   */
+  private static _parseVariableLifecycle(
+    raw: string,
+    sections: Record<string, string>
+  ): VariableLifecycle | null {
+    const match = raw.match(/```json:variable_lifecycle\s*\n([\s\S]*?)\n\s*```/);
+    if (match) {
+      try {
+        const entry: unknown = JSON.parse(match[1]);
+        if (typeof entry !== 'object' || entry === null) {
+          return null;
+        }
+        const e = entry as Record<string, unknown>;
+        return {
+          declaration: typeof e['declaration'] === 'string' ? e['declaration'] : '',
+          initialization: typeof e['initialization'] === 'string' ? e['initialization'] : '',
+          mutations: Array.isArray(e['mutations']) ? e['mutations'].map(String) : [],
+          consumption: Array.isArray(e['consumption']) ? e['consumption'].map(String) : [],
+          scopeAndLifetime: typeof e['scopeAndLifetime'] === 'string' ? e['scopeAndLifetime'] : '',
+        };
+      } catch (err) {
+        logger.warn(`ResponseParser._parseVariableLifecycle: JSON parse error: ${err}`);
+      }
+    }
+
+    // Fallback: try section-based extraction
+    const hasLifecycleData = sections['declaration'] || sections['variable lifecycle'];
+    if (!hasLifecycleData) {
+      return null;
+    }
+
+    return {
+      declaration: sections['declaration'] || '',
+      initialization: sections['initialization'] || '',
+      mutations: this._parseList(sections['mutations']),
+      consumption: this._parseList(sections['consumption']),
+      scopeAndLifetime: sections['scope & lifetime'] || sections['scope'] || '',
+    };
+  }
+
+  /**
+   * Extract the ```json:class_members ... ``` fenced block and parse into ClassMemberInfo[].
+   */
+  private static _parseClassMembers(raw: string): ClassMemberInfo[] {
+    const match = raw.match(/```json:class_members\s*\n([\s\S]*?)\n\s*```/);
+    if (!match) {
+      logger.debug('ResponseParser._parseClassMembers: no json:class_members block found');
+      return [];
+    }
+
+    try {
+      const entries: unknown[] = JSON.parse(match[1]);
+      if (!Array.isArray(entries)) {
+        return [];
+      }
+
+      const validKinds = new Set(['field', 'method', 'property', 'constructor', 'getter', 'setter']);
+      const validVisibility = new Set(['public', 'private', 'protected', 'internal']);
+
+      return entries
+        .filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null)
+        .filter((e) => typeof e['name'] === 'string')
+        .map((e) => ({
+          name: e['name'] as string,
+          memberKind: (validKinds.has(e['memberKind'] as string) ? e['memberKind'] : 'field') as ClassMemberInfo['memberKind'],
+          typeName: typeof e['typeName'] === 'string' ? e['typeName'] : 'unknown',
+          visibility: (validVisibility.has(e['visibility'] as string) ? e['visibility'] : 'public') as ClassMemberInfo['visibility'],
+          isStatic: e['isStatic'] === true,
+          description: typeof e['description'] === 'string' ? e['description'] : '',
+          line: typeof e['line'] === 'number' ? e['line'] : undefined,
+        }));
+    } catch (err) {
+      logger.warn(`ResponseParser._parseClassMembers: JSON parse error: ${err}`);
+      return [];
+    }
+  }
+
+  /**
+   * Extract the ```json:member_access ... ``` fenced block and parse into MemberAccessInfo[].
+   */
+  private static _parseMemberAccess(raw: string): MemberAccessInfo[] {
+    const match = raw.match(/```json:member_access\s*\n([\s\S]*?)\n\s*```/);
+    if (!match) {
+      logger.debug('ResponseParser._parseMemberAccess: no json:member_access block found');
+      return [];
+    }
+
+    try {
+      const entries: unknown[] = JSON.parse(match[1]);
+      if (!Array.isArray(entries)) {
+        return [];
+      }
+
+      return entries
+        .filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null)
+        .filter((e) => typeof e['memberName'] === 'string')
+        .map((e) => ({
+          memberName: e['memberName'] as string,
+          readBy: Array.isArray(e['readBy']) ? e['readBy'].map(String) : [],
+          writtenBy: Array.isArray(e['writtenBy']) ? e['writtenBy'].map(String) : [],
+          externalAccess: e['externalAccess'] === true,
+        }));
+    } catch (err) {
+      logger.warn(`ResponseParser._parseMemberAccess: JSON parse error: ${err}`);
       return [];
     }
   }

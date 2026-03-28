@@ -61,6 +61,8 @@ export class CopilotCLIProvider implements LLMProvider {
         args,
         stdinData: fullPrompt,
         label: 'copilot-cli',
+        onStdoutChunk: (chunk) => logger.logLLMChunk(chunk),
+        onStderrChunk: (chunk) => logger.logLLMChunk(`[stderr] ${chunk}`),
       });
 
       const elapsed = Date.now() - startTime;

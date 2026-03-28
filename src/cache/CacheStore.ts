@@ -11,7 +11,7 @@
  */
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { AnalysisResult, SymbolInfo, AnalysisMetadata, CallStackEntry, UsageEntry } from '../models/types';
+import type { AnalysisResult, SymbolInfo, AnalysisMetadata, CallStackEntry, UsageEntry, DataFlowEntry, ClassMemberInfo } from '../models/types';
 import { SYMBOL_KIND_PREFIX } from '../models/types';
 import { CACHE, ANALYSIS_VERSION } from '../models/constants';
 import { logger } from '../utils/logger';
@@ -228,6 +228,53 @@ export class CacheStore {
         lines.push(`- **${df.type}:** \`${df.filePath}:${df.line}\` — ${df.description}`);
       }
       lines.push('');
+
+      // Machine-readable JSON block
+      lines.push('```json:data_flow');
+      lines.push(JSON.stringify(result.dataFlow, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
+    // Variable Lifecycle
+    if (result.variableLifecycle && (result.variableLifecycle.declaration || result.variableLifecycle.initialization)) {
+      lines.push('## Variable Lifecycle');
+      lines.push('');
+      lines.push('```json:variable_lifecycle');
+      lines.push(JSON.stringify(result.variableLifecycle, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
+    // Class Members
+    if (result.classMembers && result.classMembers.length > 0) {
+      lines.push('## Class Members');
+      lines.push('');
+      for (const m of result.classMembers) {
+        const staticLabel = m.isStatic ? 'static ' : '';
+        lines.push(`- **${m.visibility} ${staticLabel}${m.memberKind}** \`${m.name}: ${m.typeName}\` — ${m.description}`);
+      }
+      lines.push('');
+
+      lines.push('```json:class_members');
+      lines.push(JSON.stringify(result.classMembers, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
+    // Member Access Patterns
+    if (result.memberAccess && result.memberAccess.length > 0) {
+      lines.push('## Member Access Patterns');
+      lines.push('');
+      for (const ma of result.memberAccess) {
+        lines.push(`- **${ma.memberName}**: read by [${ma.readBy.join(', ')}], written by [${ma.writtenBy.join(', ')}]${ma.externalAccess ? ' (external access)' : ''}`);
+      }
+      lines.push('');
+
+      lines.push('```json:member_access');
+      lines.push(JSON.stringify(result.memberAccess, null, 2));
+      lines.push('```');
+      lines.push('');
     }
 
     // Dependencies
@@ -297,17 +344,67 @@ export class CacheStore {
       // Parse callers from json:callers block
       const { callStacks, usages } = this._parseCallersJson(body);
 
+      // Parse data flow from json:data_flow block
+      const dataFlow = this._parseJsonBlock<{ type: string; filePath: string; line: number; description: string }>(body, 'data_flow');
+
+      // Parse variable lifecycle from json:variable_lifecycle block
+      const variableLifecycle = this._parseJsonObjectBlock<{
+        declaration: string;
+        initialization: string;
+        mutations: string[];
+        consumption: string[];
+        scopeAndLifetime: string;
+      }>(body, 'variable_lifecycle');
+
+      // Parse class members from json:class_members block
+      const classMembers = this._parseJsonBlock<{
+        name: string; memberKind: string; typeName: string;
+        visibility: string; isStatic: boolean; description: string; line?: number;
+      }>(body, 'class_members');
+
+      // Parse member access from json:member_access block
+      const memberAccess = this._parseJsonBlock<{
+        memberName: string; readBy: string[]; writtenBy: string[]; externalAccess: boolean;
+      }>(body, 'member_access');
+
       return {
         symbol,
         overview: sections['overview'] || '',
         callStacks,
         usages,
-        dataFlow: [],
+        dataFlow: dataFlow.map((d) => ({
+          type: d.type as DataFlowEntry['type'],
+          filePath: d.filePath,
+          line: d.line,
+          description: d.description,
+        })),
         relationships: [],
         keyMethods: this._parseList(sections['key points']),
         dependencies: this._parseList(sections['dependencies']),
         usagePattern: sections['usage pattern'] || '',
         potentialIssues: this._parseList(sections['potential issues']),
+        variableLifecycle: variableLifecycle ? {
+          declaration: variableLifecycle.declaration || '',
+          initialization: variableLifecycle.initialization || '',
+          mutations: variableLifecycle.mutations || [],
+          consumption: variableLifecycle.consumption || [],
+          scopeAndLifetime: variableLifecycle.scopeAndLifetime || '',
+        } : undefined,
+        classMembers: classMembers.length > 0 ? classMembers.map((m) => ({
+          name: m.name,
+          memberKind: m.memberKind as ClassMemberInfo['memberKind'],
+          typeName: m.typeName,
+          visibility: m.visibility as ClassMemberInfo['visibility'],
+          isStatic: m.isStatic,
+          description: m.description,
+          line: m.line,
+        })) : undefined,
+        memberAccess: memberAccess.length > 0 ? memberAccess.map((ma) => ({
+          memberName: ma.memberName,
+          readBy: ma.readBy,
+          writtenBy: ma.writtenBy,
+          externalAccess: ma.externalAccess,
+        })) : undefined,
         metadata,
       };
     } catch (err) {
@@ -422,6 +519,40 @@ export class CacheStore {
           .trim()
       )
       .filter((line) => line.length > 0 && !line.startsWith('#') && !line.startsWith('|'));
+  }
+
+  /**
+   * Parse a ```json:<tag> ... ``` fenced block from cached markdown into an array.
+   */
+  private _parseJsonBlock<T>(body: string, tag: string): T[] {
+    const regex = new RegExp('```json:' + tag + '\\s*\\n([\\s\\S]*?)\\n\\s*```');
+    const match = body.match(regex);
+    if (!match) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(match[1]);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Parse a ```json:<tag> ... ``` fenced block from cached markdown into an object.
+   */
+  private _parseJsonObjectBlock<T>(body: string, tag: string): T | null {
+    const regex = new RegExp('```json:' + tag + '\\s*\\n([\\s\\S]*?)\\n\\s*```');
+    const match = body.match(regex);
+    if (!match) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(match[1]);
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
   }
 
   private _sanitizeName(name: string): string {

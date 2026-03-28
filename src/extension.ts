@@ -11,12 +11,10 @@ import { EXTENSION_DISPLAY_NAME } from './models/constants';
  * Called when the extension is activated.
  * Activation triggers are defined in package.json activationEvents.
  */
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(_context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) {
-    vscode.window.showWarningMessage(
-      `${EXTENSION_DISPLAY_NAME} requires an open workspace.`
-    );
+    vscode.window.showWarningMessage(`${EXTENSION_DISPLAY_NAME} requires an open workspace.`);
     return;
   }
 

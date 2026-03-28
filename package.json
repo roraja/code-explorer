@@ -198,7 +198,7 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"webview/src/**/*.ts\" \"test/**/*.ts\"",
     "pretest": "npm run build && tsc -p tsconfig.test.json",
     "test": "node ./out/test/runTests.js",
-    "test:unit": "mocha --require ts-node/register 'test/unit/**/*.test.ts'",
+    "test:unit": "TS_NODE_PROJECT=tsconfig.test.json mocha",
     "package": "npm run build && vsce package --no-dependencies",
     "vscode:prepublish": "npm run build"
   },

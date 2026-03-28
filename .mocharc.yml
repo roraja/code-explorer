@@ -1,0 +1,8 @@
+spec: "test/unit/**/*.test.ts"
+require:
+  - ts-node/register
+timeout: 5000
+ui: tdd
+recursive: true
+node-option:
+  - "no-warnings"

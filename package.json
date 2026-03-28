@@ -26,7 +26,12 @@
     "onLanguage:typescript",
     "onLanguage:javascript",
     "onLanguage:typescriptreact",
-    "onLanguage:javascriptreact"
+    "onLanguage:javascriptreact",
+    "onLanguage:cpp",
+    "onLanguage:c",
+    "onLanguage:python",
+    "onLanguage:java",
+    "onLanguage:csharp"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -75,7 +80,7 @@
       "editor/context": [
         {
           "command": "codeExplorer.exploreSymbol",
-          "when": "editorTextFocus && resourceLangId =~ /typescript|javascript|typescriptreact|javascriptreact/",
+          "when": "editorTextFocus && resourceLangId =~ /typescript|javascript|typescriptreact|javascriptreact|cpp|c|python|java|csharp/",
           "group": "navigation@10"
         }
       ],

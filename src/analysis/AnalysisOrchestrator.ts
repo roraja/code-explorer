@@ -15,8 +15,24 @@ import type { CacheStore } from '../cache/CacheStore';
 import { PromptBuilder } from '../llm/PromptBuilder';
 import { ResponseParser } from '../llm/ResponseParser';
 import { StaticAnalyzer } from './StaticAnalyzer';
-import { ANALYSIS_VERSION } from '../models/constants';
+import { ANALYSIS_VERSION, STATIC_ANALYSIS_TIMEOUT_MS } from '../models/constants';
 import { logger } from '../utils/logger';
+
+/**
+ * Race a promise against a timeout. Returns the fallback value on timeout.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => {
+      logger.warn(`${label} timed out after ${ms}ms, using fallback`);
+      resolve(fallback);
+    }, ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); logger.warn(`${label} failed: ${err}`); resolve(fallback); }
+    );
+  });
+}
 
 export class AnalysisOrchestrator {
   private readonly _onAnalysisComplete = new vscode.EventEmitter<AnalysisResult>();
@@ -41,17 +57,22 @@ export class AnalysisOrchestrator {
         (force ? ' (forced)' : '')
     );
 
+    // Start LLM call log for this symbol
+    logger.startLLMCallLog(symbol.name, this._llmProvider.name);
+    logger.logLLMStep(
+      `Starting analysis of ${symbol.kind} "${symbol.name}" in ${symbol.filePath}` +
+        (force ? ' (forced re-analysis)' : '')
+    );
+
     // 1. Check disk cache (unless forced)
     let cachedLLMFields: Partial<AnalysisResult> | null = null;
     let cachedMeta: AnalysisResult['metadata'] | null = null;
 
     if (!force) {
+      logger.logLLMStep('Checking disk cache...');
       try {
         const cached = await this._cache.read(symbol);
         if (cached && !cached.metadata.stale) {
-          // Cache has LLM-generated fields (overview, keyMethods, etc.)
-          // but static data (usages, callStacks, relationships) may be stale.
-          // If the cache contains LLM data, re-use it and only refresh static data.
           if (cached.metadata.llmProvider) {
             cachedLLMFields = {
               overview: cached.overview,
@@ -63,33 +84,48 @@ export class AnalysisOrchestrator {
               dataFlow: cached.dataFlow,
             };
             cachedMeta = cached.metadata;
+            logger.logLLMStep(
+              `CACHE HIT — reusing LLM fields from ${cached.metadata.llmProvider} ` +
+                `(analyzed ${cached.metadata.analyzedAt}), will refresh static data only`
+            );
             logger.info(
               `Orchestrator: CACHE HIT (LLM fields) for "${symbol.name}" ` +
                 `(analyzed ${cached.metadata.analyzedAt}, provider: ${cached.metadata.llmProvider}), ` +
                 `refreshing static data`
             );
           } else {
-            // Static-only cache — just re-analyze fully, it's cheap
+            logger.logLLMStep('Cache has static-only data, will re-analyze fully');
             logger.info(`Orchestrator: static-only cache for "${symbol.name}", re-analyzing`);
           }
-        }
-        if (cached?.metadata.stale) {
+        } else if (cached?.metadata.stale) {
+          logger.logLLMStep('Cache is stale, will re-analyze fully');
           logger.info(`Orchestrator: cache is stale for "${symbol.name}", re-analyzing`);
+        } else {
+          logger.logLLMStep('No cache entry found');
         }
       } catch (err) {
+        logger.logLLMStep(`Cache read error: ${err}`);
         logger.debug(`Orchestrator: cache read error: ${err}`);
       }
+    } else {
+      logger.logLLMStep('Skipping cache (forced re-analysis)');
     }
 
     // 2. Static analysis (fast, always available)
+    logger.logLLMStep('Running static analysis (references, call hierarchy, type hierarchy, source)...');
     logger.info(`Orchestrator: running static analysis for "${symbol.name}"`);
+    const timeout = STATIC_ANALYSIS_TIMEOUT_MS;
     const [usages, callStacks, relationships, sourceCode] = await Promise.all([
-      this._staticAnalyzer.findReferences(symbol),
-      this._staticAnalyzer.buildCallHierarchy(symbol),
-      this._staticAnalyzer.getTypeHierarchy(symbol),
-      this._staticAnalyzer.readSymbolSource(symbol),
+      withTimeout(this._staticAnalyzer.findReferences(symbol), timeout, [], 'findReferences'),
+      withTimeout(this._staticAnalyzer.buildCallHierarchy(symbol), timeout, [], 'buildCallHierarchy'),
+      withTimeout(this._staticAnalyzer.getTypeHierarchy(symbol), timeout, [], 'getTypeHierarchy'),
+      withTimeout(this._staticAnalyzer.readSymbolSource(symbol), timeout, '', 'readSymbolSource'),
     ]);
 
+    logger.logLLMStep(
+      `Static analysis complete — ${usages.length} refs, ${callStacks.length} callers, ` +
+        `${relationships.length} relationships, source: ${sourceCode.length} chars`
+    );
     logger.info(
       `Orchestrator: static analysis done — ${usages.length} refs, ${callStacks.length} callers, ` +
         `${relationships.length} relationships, source: ${sourceCode.length} chars`
@@ -103,19 +139,29 @@ export class AnalysisOrchestrator {
       // Re-use cached LLM fields
       llmResult = cachedLLMFields;
       llmProviderName = cachedMeta?.llmProvider;
+      logger.logLLMStep(`Using cached LLM data from ${llmProviderName}, skipping LLM call`);
       logger.info(`Orchestrator: using cached LLM data from ${llmProviderName}`);
     } else {
       try {
+        logger.logLLMStep(`Checking if LLM provider "${this._llmProvider.name}" is available...`);
         const available = await this._llmProvider.isAvailable();
         if (available && sourceCode) {
+          logger.logLLMStep(`LLM provider available — building prompt...`);
           logger.info(`Orchestrator: running LLM analysis with ${this._llmProvider.name}`);
 
           const prompt = PromptBuilder.build(symbol, sourceCode, usages);
+          logger.logLLMStep(`Prompt built (${prompt.length} chars), sending to ${this._llmProvider.name}...`);
+
+          // Log the prompt before sending
+          logger.logLLMInput(prompt);
+
           const rawResponse = await this._llmProvider.analyze({
             prompt,
             systemPrompt: PromptBuilder.SYSTEM_PROMPT,
             maxTokens: 4096,
           });
+
+          logger.logLLMStep(`Response received (${rawResponse.length} chars), parsing...`);
 
           logger.debug(
             `Orchestrator: LLM raw response (first 500 chars): ${rawResponse.substring(0, 500).replace(/\n/g, '\\n')}`
@@ -124,6 +170,16 @@ export class AnalysisOrchestrator {
           llmResult = ResponseParser.parse(rawResponse, symbol);
           llmProviderName = this._llmProvider.name;
 
+          logger.logLLMStep(
+            `Parsed LLM response — overview: ${(llmResult.overview || '').length} chars, ` +
+              `keyMethods: ${llmResult.keyMethods?.length || 0}, ` +
+              `dependencies: ${llmResult.dependencies?.length || 0}, ` +
+              `issues: ${llmResult.potentialIssues?.length || 0}`
+          );
+
+          // Log the full response
+          logger.logLLMOutput(rawResponse);
+
           logger.info(
             `Orchestrator: LLM done — overview: ${(llmResult.overview || '').length} chars, ` +
               `keyMethods: ${llmResult.keyMethods?.length || 0}, ` +
@@ -131,18 +187,22 @@ export class AnalysisOrchestrator {
               `issues: ${llmResult.potentialIssues?.length || 0}`
           );
         } else if (!available) {
+          logger.logLLMStep(`LLM provider "${this._llmProvider.name}" not available — falling back to static only`);
           logger.warn(
             `Orchestrator: LLM provider "${this._llmProvider.name}" not available, static only`
           );
         } else {
+          logger.logLLMStep('No source code available — skipping LLM analysis');
           logger.warn('Orchestrator: no source code, skipping LLM');
         }
       } catch (err) {
+        logger.logLLMStep(`LLM analysis FAILED: ${err}`);
         logger.error(`Orchestrator: LLM analysis failed: ${err}`);
       }
     }
 
     // 4. Merge results
+    logger.logLLMStep('Merging static + LLM results...');
     const result: AnalysisResult = {
       symbol,
       overview:
@@ -167,13 +227,17 @@ export class AnalysisOrchestrator {
     };
 
     // 5. Write to cache
+    logger.logLLMStep('Writing results to disk cache...');
     try {
       await this._cache.write(result);
+      logger.logLLMStep('Cache write successful');
     } catch (err) {
+      logger.logLLMStep(`Cache write FAILED: ${err}`);
       logger.warn(`Orchestrator: cache write failed: ${err}`);
     }
 
     const elapsed = Date.now() - startTime;
+    logger.logLLMStep(`Analysis complete in ${elapsed}ms` + (llmProviderName ? ` (with ${llmProviderName})` : ' (static only)'));
     logger.info(
       `Orchestrator: analysis complete for "${symbol.name}" in ${elapsed}ms` +
         (llmProviderName ? ` (with ${llmProviderName})` : ' (static only)')

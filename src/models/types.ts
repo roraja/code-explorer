@@ -77,6 +77,13 @@ export interface SymbolInfo {
    * Example: "UserController" for method "getUser" inside that class.
    */
   containerName?: string;
+  /**
+   * Full scope chain from root to this symbol (excludes the symbol itself).
+   * Each entry is the name of an enclosing scope.
+   * Example: ["UserService", "getUser"] for a local variable inside getUser()
+   * Used as the primary axis for cache key resolution and tab deduplication.
+   */
+  scopeChain?: string[];
 }
 
 // =====================

@@ -78,5 +78,8 @@ export const QUEUE = {
   DEFAULT_MAX_RETRIES: 2,
 } as const;
 
+/** Timeout for individual static analysis operations (ms). */
+export const STATIC_ANALYSIS_TIMEOUT_MS = 15_000;
+
 /** Analysis version identifier. */
 export const ANALYSIS_VERSION = '1.0.0';

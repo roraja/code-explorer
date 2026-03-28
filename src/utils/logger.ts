@@ -33,6 +33,9 @@ let _logDir: string | undefined;
 let _logStream: fs.WriteStream | undefined;
 let _currentLogDate: string | undefined;
 let _sessionId: string | undefined;
+let _llmCallCounter = 0;
+let _llmLogDir: string | undefined;
+let _activeLLMLogFile: string | undefined;
 
 // ── helpers ──────────────────────────────────────────────
 
@@ -140,6 +143,8 @@ export const logger = {
    */
   init(workspaceRoot: string): void {
     _logDir = path.join(workspaceRoot, '.vscode', CACHE.DIR_NAME, 'logs');
+    _llmLogDir = path.join(_logDir, 'llms');
+    _llmCallCounter = 0;
     _sessionId = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
 
     // Force-write the first line so the file is created immediately
@@ -186,5 +191,90 @@ export const logger = {
 
   error(message: string, ...args: unknown[]): void {
     emit(LogLevel.ERROR, message, args);
+  },
+
+  /**
+   * Start a new LLM call log file. Creates the markdown file with a header.
+   * Subsequent calls to logLLMStep/logLLMInput/logLLMOutput append to this file.
+   */
+  startLLMCallLog(symbolName: string, provider: string): void {
+    if (!_llmLogDir) {
+      return;
+    }
+    try {
+      fs.mkdirSync(_llmLogDir, { recursive: true });
+      _llmCallCounter++;
+      const seq = String(_llmCallCounter).padStart(2, '0');
+      const safeName = symbolName.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileName = `${seq}-${safeName}-call.md`;
+      _activeLLMLogFile = path.join(_llmLogDir, fileName);
+
+      const header =
+        `# LLM Call: ${symbolName}\n\n` +
+        `- **Provider:** ${provider}\n` +
+        `- **Started:** ${new Date().toISOString()}\n` +
+        `- **Session:** ${_sessionId}\n\n` +
+        `---\n\n` +
+        `## Agent Progress\n\n`;
+
+      fs.writeFileSync(_activeLLMLogFile, header, 'utf-8');
+      emit(LogLevel.DEBUG, `LLM call log started: ${fileName}`, []);
+    } catch {
+      _activeLLMLogFile = undefined;
+      emit(LogLevel.WARN, `Failed to start LLM call log for "${symbolName}"`, []);
+    }
+  },
+
+  /**
+   * Append a timestamped progress step to the active LLM log file.
+   * Use this to trace what the agent is thinking/deciding at each stage.
+   */
+  logLLMStep(message: string): void {
+    if (!_activeLLMLogFile) {
+      return;
+    }
+    try {
+      const line = `- \`${timestamp()}\` ${message}\n`;
+      fs.appendFileSync(_activeLLMLogFile, line, 'utf-8');
+    } catch {
+      // silently skip
+    }
+  },
+
+  /**
+   * Append the full prompt (input) section to the active LLM log file.
+   */
+  logLLMInput(prompt: string): void {
+    if (!_activeLLMLogFile) {
+      return;
+    }
+    try {
+      const section =
+        `\n---\n\n` +
+        `## Input (Prompt)\n\n` +
+        '```\n' + prompt + '\n```\n\n';
+      fs.appendFileSync(_activeLLMLogFile, section, 'utf-8');
+    } catch {
+      // silently skip
+    }
+  },
+
+  /**
+   * Append the full response (output) section to the active LLM log file.
+   */
+  logLLMOutput(response: string): void {
+    if (!_activeLLMLogFile) {
+      return;
+    }
+    try {
+      const section =
+        `---\n\n` +
+        `## Output (Response)\n\n` +
+        response + '\n';
+      fs.appendFileSync(_activeLLMLogFile, section, 'utf-8');
+      _activeLLMLogFile = undefined; // done with this log
+    } catch {
+      _activeLLMLogFile = undefined;
+    }
   },
 };

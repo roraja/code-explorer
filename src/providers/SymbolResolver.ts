@@ -54,6 +54,7 @@ export class SymbolResolver {
           kind: 'unknown',
           filePath: relPath,
           position: { line: position.line, character: position.character },
+          scopeChain: [],
         };
       }
       logger.warn('SymbolResolver: no symbol and no word at cursor position');
@@ -62,6 +63,9 @@ export class SymbolResolver {
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
     const relPath = path.relative(workspaceRoot, document.fileName);
+
+    // Build the scope chain: names of all ancestors (excluding the symbol itself)
+    const scopeChain = match.ancestors.map((a) => a.name);
 
     const info: SymbolInfo = {
       name: match.symbol.name,
@@ -81,36 +85,41 @@ export class SymbolResolver {
           character: match.symbol.range.end.character,
         },
       },
-      containerName: match.parent?.name,
+      containerName: match.ancestors.length > 0
+        ? match.ancestors[match.ancestors.length - 1].name
+        : undefined,
+      scopeChain,
     };
 
     logger.info(
-      `Resolved symbol: ${info.kind} ${info.name} in ${info.filePath}:${info.position.line}`
+      `Resolved symbol: ${info.kind} ${info.name} in ${info.filePath}:${info.position.line}` +
+        (scopeChain.length > 0 ? ` scope=[${scopeChain.join('.')}]` : '')
     );
     return info;
   }
 
   /**
    * Walk the symbol tree to find the deepest symbol whose range contains the position.
+   * Returns the matched symbol and the full ancestor chain (root → parent).
    */
   private _findDeepest(
     symbols: vscode.DocumentSymbol[],
     position: vscode.Position,
-    parent?: vscode.DocumentSymbol
-  ): { symbol: vscode.DocumentSymbol; parent?: vscode.DocumentSymbol } | null {
+    ancestors: vscode.DocumentSymbol[] = []
+  ): { symbol: vscode.DocumentSymbol; ancestors: vscode.DocumentSymbol[] } | null {
     for (const sym of symbols) {
       if (sym.range.contains(position)) {
         // Check children first for a tighter match
-        const childMatch = this._findDeepest(sym.children, position, sym);
+        const childMatch = this._findDeepest(sym.children, position, [...ancestors, sym]);
         if (childMatch) {
           return childMatch;
         }
         // If the cursor is on the symbol's name, return it
         if (sym.selectionRange.contains(position)) {
-          return { symbol: sym, parent };
+          return { symbol: sym, ancestors };
         }
         // Otherwise still return it as the containing symbol
-        return { symbol: sym, parent };
+        return { symbol: sym, ancestors };
       }
     }
     return null;

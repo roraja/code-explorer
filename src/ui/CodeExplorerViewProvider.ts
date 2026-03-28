@@ -62,14 +62,19 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
   public async openTab(symbol: SymbolInfo): Promise<void> {
     logger.info(`ViewProvider.openTab: ${symbol.kind} "${symbol.name}" in ${symbol.filePath}`);
 
-    // Find existing tab for this symbol (match on name + filePath + containerName + line)
-    const existingIdx = this._tabs.findIndex(
-      (t) =>
-        t.symbol.name === symbol.name &&
-        t.symbol.filePath === symbol.filePath &&
-        t.symbol.containerName === symbol.containerName &&
-        t.symbol.position.line === symbol.position.line
-    );
+    // Find existing tab for this symbol using scope chain for unique identity.
+    // Scope chain distinguishes local variables with the same name in different functions.
+    const existingIdx = this._tabs.findIndex((t) => {
+      if (t.symbol.filePath !== symbol.filePath || t.symbol.name !== symbol.name) {
+        return false;
+      }
+      const a = t.symbol.scopeChain ?? [];
+      const b = symbol.scopeChain ?? [];
+      if (a.length !== b.length) {
+        return false;
+      }
+      return a.every((v, i) => v === b[i]);
+    });
 
     if (existingIdx >= 0) {
       const existing = this._tabs[existingIdx];

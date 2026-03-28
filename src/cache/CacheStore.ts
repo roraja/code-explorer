@@ -87,13 +87,31 @@ export class CacheStore {
   /**
    * Resolve the cache file path for a symbol.
    */
-  private _resolvePath(symbol: SymbolInfo): string {
+  /**
+   * Build a stable, unique cache key string for a symbol.
+   * Format: "scopeA.scopeB.kind:name"
+   * The scope chain ensures local variables in different functions get distinct keys.
+   */
+  private _buildCacheKey(symbol: SymbolInfo): string {
     const prefix = SYMBOL_KIND_PREFIX[symbol.kind] || 'sym';
-    const safeName = this._sanitizeName(symbol.name);
-    const fileName = symbol.containerName
-      ? `${prefix}.${this._sanitizeName(symbol.containerName)}.${safeName}.md`
-      : `${prefix}.${safeName}.md`;
+    const chain = symbol.scopeChain && symbol.scopeChain.length > 0
+      ? symbol.scopeChain.map((s) => this._sanitizeName(s)).join('.')
+      : null;
 
+    // Fallback: use containerName for symbols resolved without a scope chain
+    // (e.g., programmatic calls from other extensions)
+    if (!chain && symbol.containerName) {
+      return `${this._sanitizeName(symbol.containerName)}.${prefix}.${this._sanitizeName(symbol.name)}`;
+    }
+    if (chain) {
+      return `${chain}.${prefix}.${this._sanitizeName(symbol.name)}`;
+    }
+    return `${prefix}.${this._sanitizeName(symbol.name)}`;
+  }
+
+  private _resolvePath(symbol: SymbolInfo): string {
+    const cacheKey = this._buildCacheKey(symbol);
+    const fileName = `${cacheKey}.md`;
     return path.join(this._cacheRoot, symbol.filePath, fileName);
   }
 
@@ -110,6 +128,9 @@ export class CacheStore {
     lines.push(`kind: ${s.kind}`);
     lines.push(`file: ${s.filePath}`);
     lines.push(`line: ${s.position.line}`);
+    if (s.scopeChain && s.scopeChain.length > 0) {
+      lines.push(`scope_chain: "${s.scopeChain.join('.')}"`);
+    }
     lines.push(`analyzed_at: "${m.analyzedAt}"`);
     lines.push(`analysis_version: "${m.analysisVersion}"`);
     if (m.llmProvider) {

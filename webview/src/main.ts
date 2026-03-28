@@ -18,7 +18,7 @@ const vscode = (window as any).acquireVsCodeApi?.() ?? {
 
 interface Tab {
   id: string;
-  symbol: { name: string; kind: string; filePath: string };
+  symbol: { name: string; kind: string; filePath: string; scopeChain?: string[] };
   status: 'loading' | 'ready' | 'error' | 'stale';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   analysis: any;
@@ -105,9 +105,13 @@ function renderTabBar(): string {
           : tab.status === 'error'
             ? '<span class="tab__status tab__status--error">✕</span>'
             : '';
+      // Show scope context in tab label for nested symbols (e.g., "getUser › result")
+      const scope = tab.symbol.scopeChain && tab.symbol.scopeChain.length > 0
+        ? tab.symbol.scopeChain[tab.symbol.scopeChain.length - 1] + ' › '
+        : '';
       return `<div class="tab${active}" data-tab-id="${tab.id}">
         <span class="tab__icon">${icon}</span>
-        <span class="tab__label">${esc(tab.symbol.name)}</span>
+        <span class="tab__label" title="${esc((tab.symbol.scopeChain || []).concat(tab.symbol.name).join('.'))}">${esc(scope)}${esc(tab.symbol.name)}</span>
         ${statusDot}
         <span class="tab__close" data-close-id="${tab.id}">×</span>
       </div>`;

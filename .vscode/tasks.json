@@ -71,6 +71,14 @@
       "script": "package",
       "group": "build",
       "problemMatcher": []
+    },
+    {
+      "label": "Install Extension",
+      "type": "shell",
+      "command": "code --install-extension $(ls -t *.vsix | head -1)",
+      "group": "build",
+      "dependsOn": ["Package VSIX"],
+      "problemMatcher": []
     }
   ]
 }

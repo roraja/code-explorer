@@ -10,7 +10,7 @@ import { CodeExplorerViewProvider } from './ui/CodeExplorerViewProvider';
 import { SymbolResolver } from './providers/SymbolResolver';
 import { StaticAnalyzer } from './analysis/StaticAnalyzer';
 import { AnalysisOrchestrator } from './analysis/AnalysisOrchestrator';
-import { CacheWriter } from './cache/CacheWriter';
+import { CacheStore } from './cache/CacheStore';
 import { LLMProviderFactory } from './llm/LLMProviderFactory';
 import { logger, LogLevel } from './utils/logger';
 
@@ -37,8 +37,8 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- Analysis Layer ---
   const symbolResolver = new SymbolResolver();
   const staticAnalyzer = new StaticAnalyzer();
-  const cacheWriter = new CacheWriter(workspaceRoot);
-  const orchestrator = new AnalysisOrchestrator(staticAnalyzer, llmProvider, cacheWriter);
+  const cacheStore = new CacheStore(workspaceRoot);
+  const orchestrator = new AnalysisOrchestrator(staticAnalyzer, llmProvider, cacheStore);
 
   context.subscriptions.push({ dispose: () => orchestrator.dispose() });
 
@@ -109,8 +109,14 @@ export function activate(context: vscode.ExtensionContext): void {
         'Clear'
       );
       if (confirm === 'Clear') {
-        logger.info('Cache cleared');
-        vscode.window.showInformationMessage('Code Explorer cache cleared.');
+        try {
+          await cacheStore.clear();
+          logger.info('Cache cleared');
+          vscode.window.showInformationMessage('Code Explorer cache cleared.');
+        } catch (err) {
+          logger.error(`Failed to clear cache: ${err}`);
+          vscode.window.showErrorMessage('Failed to clear cache.');
+        }
       }
     }),
 

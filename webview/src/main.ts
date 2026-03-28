@@ -34,6 +34,15 @@ function log(msg: string): void {
 
 function init(): void {
   log('init');
+
+  // Restore persisted state if available (avoids flash of empty on re-show)
+  const saved = vscode.getState() as { tabs: Tab[]; activeTabId: string | null } | null;
+  if (saved && saved.tabs) {
+    currentTabs = saved.tabs;
+    currentActiveTabId = saved.activeTabId;
+    log(`restored saved state: ${currentTabs.length} tabs`);
+  }
+
   render();
 
   window.addEventListener('message', (event) => {
@@ -42,6 +51,8 @@ function init(): void {
       currentTabs = msg.tabs || [];
       currentActiveTabId = msg.activeTabId;
       log(`setState: ${currentTabs.length} tabs, active=${currentActiveTabId}`);
+      // Persist for webview re-creation
+      vscode.setState({ tabs: currentTabs, activeTabId: currentActiveTabId });
       render();
     }
   });

@@ -42,19 +42,38 @@ export class AnalysisOrchestrator {
     );
 
     // 1. Check disk cache (unless forced)
+    let cachedLLMFields: Partial<AnalysisResult> | null = null;
+    let cachedMeta: AnalysisResult['metadata'] | null = null;
+
     if (!force) {
       try {
         const cached = await this._cache.read(symbol);
         if (cached && !cached.metadata.stale) {
-          const elapsed = Date.now() - startTime;
-          logger.info(
-            `Orchestrator: CACHE HIT for "${symbol.name}" in ${elapsed}ms ` +
-              `(analyzed ${cached.metadata.analyzedAt}, provider: ${cached.metadata.llmProvider || 'static'})`
-          );
-          this._onAnalysisComplete.fire(cached);
-          return cached;
+          // Cache has LLM-generated fields (overview, keyMethods, etc.)
+          // but static data (usages, callStacks, relationships) may be stale.
+          // If the cache contains LLM data, re-use it and only refresh static data.
+          if (cached.metadata.llmProvider) {
+            cachedLLMFields = {
+              overview: cached.overview,
+              keyMethods: cached.keyMethods,
+              dependencies: cached.dependencies,
+              usagePattern: cached.usagePattern,
+              potentialIssues: cached.potentialIssues,
+              variableLifecycle: cached.variableLifecycle,
+              dataFlow: cached.dataFlow,
+            };
+            cachedMeta = cached.metadata;
+            logger.info(
+              `Orchestrator: CACHE HIT (LLM fields) for "${symbol.name}" ` +
+                `(analyzed ${cached.metadata.analyzedAt}, provider: ${cached.metadata.llmProvider}), ` +
+                `refreshing static data`
+            );
+          } else {
+            // Static-only cache — just re-analyze fully, it's cheap
+            logger.info(`Orchestrator: static-only cache for "${symbol.name}", re-analyzing`);
+          }
         }
-        if (cached) {
+        if (cached?.metadata.stale) {
           logger.info(`Orchestrator: cache is stale for "${symbol.name}", re-analyzing`);
         }
       } catch (err) {
@@ -76,44 +95,51 @@ export class AnalysisOrchestrator {
         `${relationships.length} relationships, source: ${sourceCode.length} chars`
     );
 
-    // 3. LLM analysis (slow, may be unavailable)
+    // 3. LLM analysis (slow, may be unavailable) — skip if cached LLM data is available
     let llmResult: Partial<AnalysisResult> = {};
     let llmProviderName: string | undefined;
 
-    try {
-      const available = await this._llmProvider.isAvailable();
-      if (available && sourceCode) {
-        logger.info(`Orchestrator: running LLM analysis with ${this._llmProvider.name}`);
+    if (cachedLLMFields) {
+      // Re-use cached LLM fields
+      llmResult = cachedLLMFields;
+      llmProviderName = cachedMeta?.llmProvider;
+      logger.info(`Orchestrator: using cached LLM data from ${llmProviderName}`);
+    } else {
+      try {
+        const available = await this._llmProvider.isAvailable();
+        if (available && sourceCode) {
+          logger.info(`Orchestrator: running LLM analysis with ${this._llmProvider.name}`);
 
-        const prompt = PromptBuilder.build(symbol, sourceCode, usages);
-        const rawResponse = await this._llmProvider.analyze({
-          prompt,
-          systemPrompt: PromptBuilder.SYSTEM_PROMPT,
-          maxTokens: 4096,
-        });
+          const prompt = PromptBuilder.build(symbol, sourceCode, usages);
+          const rawResponse = await this._llmProvider.analyze({
+            prompt,
+            systemPrompt: PromptBuilder.SYSTEM_PROMPT,
+            maxTokens: 4096,
+          });
 
-        logger.debug(
-          `Orchestrator: LLM raw response (first 500 chars): ${rawResponse.substring(0, 500).replace(/\n/g, '\\n')}`
-        );
+          logger.debug(
+            `Orchestrator: LLM raw response (first 500 chars): ${rawResponse.substring(0, 500).replace(/\n/g, '\\n')}`
+          );
 
-        llmResult = ResponseParser.parse(rawResponse, symbol);
-        llmProviderName = this._llmProvider.name;
+          llmResult = ResponseParser.parse(rawResponse, symbol);
+          llmProviderName = this._llmProvider.name;
 
-        logger.info(
-          `Orchestrator: LLM done — overview: ${(llmResult.overview || '').length} chars, ` +
-            `keyMethods: ${llmResult.keyMethods?.length || 0}, ` +
-            `dependencies: ${llmResult.dependencies?.length || 0}, ` +
-            `issues: ${llmResult.potentialIssues?.length || 0}`
-        );
-      } else if (!available) {
-        logger.warn(
-          `Orchestrator: LLM provider "${this._llmProvider.name}" not available, static only`
-        );
-      } else {
-        logger.warn('Orchestrator: no source code, skipping LLM');
+          logger.info(
+            `Orchestrator: LLM done — overview: ${(llmResult.overview || '').length} chars, ` +
+              `keyMethods: ${llmResult.keyMethods?.length || 0}, ` +
+              `dependencies: ${llmResult.dependencies?.length || 0}, ` +
+              `issues: ${llmResult.potentialIssues?.length || 0}`
+          );
+        } else if (!available) {
+          logger.warn(
+            `Orchestrator: LLM provider "${this._llmProvider.name}" not available, static only`
+          );
+        } else {
+          logger.warn('Orchestrator: no source code, skipping LLM');
+        }
+      } catch (err) {
+        logger.error(`Orchestrator: LLM analysis failed: ${err}`);
       }
-    } catch (err) {
-      logger.error(`Orchestrator: LLM analysis failed: ${err}`);
     }
 
     // 4. Merge results

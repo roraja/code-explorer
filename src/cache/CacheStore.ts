@@ -23,6 +23,16 @@ export class CacheStore {
     this._cacheRoot = path.join(workspaceRoot, '.vscode', CACHE.DIR_NAME);
   }
 
+  // ── Clear ───────────────────────────────────────────────
+
+  /**
+   * Delete all cached analysis files.
+   */
+  async clear(): Promise<void> {
+    logger.info(`CacheStore.clear: removing ${this._cacheRoot}`);
+    await fs.rm(this._cacheRoot, { recursive: true, force: true });
+  }
+
   // ── Read ────────────────────────────────────────────────
 
   /**
@@ -108,6 +118,12 @@ export class CacheStore {
     if (m.sourceHash) {
       lines.push(`source_hash: "${m.sourceHash}"`);
     }
+    if (Object.keys(m.dependentFileHashes).length > 0) {
+      lines.push('dependent_files:');
+      for (const [fp, hash] of Object.entries(m.dependentFileHashes)) {
+        lines.push(`  "${fp}": "${hash}"`);
+      }
+    }
     lines.push(`stale: ${m.stale}`);
     lines.push('---');
     lines.push('');
@@ -173,6 +189,16 @@ export class CacheStore {
       lines.push('');
     }
 
+    // Data Flow
+    if (result.dataFlow.length > 0) {
+      lines.push('## Data Flow');
+      lines.push('');
+      for (const df of result.dataFlow) {
+        lines.push(`- **${df.type}:** \`${df.filePath}:${df.line}\` — ${df.description}`);
+      }
+      lines.push('');
+    }
+
     // Dependencies
     if (result.dependencies && result.dependencies.length > 0) {
       lines.push('## Dependencies');
@@ -212,8 +238,8 @@ export class CacheStore {
    */
   private _deserialize(content: string, symbol: SymbolInfo): AnalysisResult | null {
     try {
-      // Split frontmatter from body
-      const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+      // Split frontmatter from body (handle both \n and \r\n)
+      const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
       if (!fmMatch) {
         logger.warn('CacheStore._deserialize: no frontmatter found');
         return null;

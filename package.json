@@ -1,0 +1,222 @@
+{
+  "name": "code-explorer",
+  "displayName": "Code Explorer",
+  "description": "AI-powered code intelligence sidebar for VS Code — deep symbol analysis, call stacks, usage tracking, and data flow visualization.",
+  "version": "0.1.0",
+  "publisher": "code-explorer-team",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "code analysis",
+    "call hierarchy",
+    "symbol explorer",
+    "AI",
+    "LLM",
+    "code intelligence"
+  ],
+  "activationEvents": [
+    "onView:codeExplorer.sidebar",
+    "onCommand:codeExplorer.exploreSymbol",
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascriptreact"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeExplorer",
+          "title": "Code Explorer",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codeExplorer": [
+        {
+          "type": "webview",
+          "id": "codeExplorer.sidebar",
+          "name": "Code Explorer"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "codeExplorer.exploreSymbol",
+        "title": "Explore Symbol",
+        "category": "Code Explorer"
+      },
+      {
+        "command": "codeExplorer.refreshAnalysis",
+        "title": "Refresh Analysis",
+        "category": "Code Explorer",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codeExplorer.clearCache",
+        "title": "Clear Cache",
+        "category": "Code Explorer"
+      },
+      {
+        "command": "codeExplorer.analyzeWorkspace",
+        "title": "Analyze Workspace",
+        "category": "Code Explorer"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "codeExplorer.exploreSymbol",
+          "when": "editorTextFocus && resourceLangId =~ /typescript|javascript|typescriptreact|javascriptreact/",
+          "group": "navigation@10"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "codeExplorer.refreshAnalysis",
+          "when": "view == codeExplorer.sidebar",
+          "group": "navigation"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "codeExplorer.exploreSymbol",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Code Explorer",
+      "properties": {
+        "codeExplorer.llmProvider": {
+          "type": "string",
+          "default": "mai-claude",
+          "enum": [
+            "mai-claude",
+            "copilot-cli",
+            "none"
+          ],
+          "enumDescriptions": [
+            "Use mai-claude CLI for AI analysis",
+            "Use GitHub Copilot CLI for AI analysis",
+            "Disable AI analysis (static analysis only)"
+          ],
+          "description": "LLM provider for deep code analysis."
+        },
+        "codeExplorer.autoAnalyzeOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically re-analyze changed symbols when a file is saved."
+        },
+        "codeExplorer.cacheTTLHours": {
+          "type": "number",
+          "default": 168,
+          "minimum": 1,
+          "description": "Cache time-to-live in hours (default: 168 = 7 days)."
+        },
+        "codeExplorer.maxConcurrentAnalyses": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum number of concurrent LLM analysis requests."
+        },
+        "codeExplorer.excludePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/out/**",
+            "**/.git/**"
+          ],
+          "description": "Glob patterns to exclude from analysis."
+        },
+        "codeExplorer.analysisDepth": {
+          "type": "string",
+          "default": "standard",
+          "enum": [
+            "shallow",
+            "standard",
+            "deep"
+          ],
+          "enumDescriptions": [
+            "Quick analysis with minimal LLM usage",
+            "Balanced analysis depth",
+            "Thorough analysis with full context"
+          ],
+          "description": "Depth of LLM analysis."
+        },
+        "codeExplorer.periodicAnalysisIntervalMinutes": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Background analysis interval in minutes (0 = disabled)."
+        },
+        "codeExplorer.openOnClick": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically open sidebar when clicking on a symbol."
+        },
+        "codeExplorer.maxCallStackDepth": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Maximum depth for call stack analysis."
+        },
+        "codeExplorer.showHoverCards": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Code Explorer info in hover tooltips."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run build:extension && npm run build:webview",
+    "build:extension": "node esbuild.config.mjs --production",
+    "build:webview": "node webview/esbuild.config.mjs --production",
+    "watch": "concurrently \"npm run watch:extension\" \"npm run watch:webview\"",
+    "watch:extension": "node esbuild.config.mjs --watch",
+    "watch:webview": "node webview/esbuild.config.mjs --watch",
+    "lint": "eslint src/ webview/src/ test/ --ext .ts",
+    "lint:fix": "eslint src/ webview/src/ test/ --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"webview/src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"webview/src/**/*.ts\" \"test/**/*.ts\"",
+    "pretest": "npm run build && tsc -p tsconfig.test.json",
+    "test": "node ./out/test/runTests.js",
+    "test:unit": "mocha --require ts-node/register 'test/unit/**/*.test.ts'",
+    "package": "npm run build && vsce package --no-dependencies",
+    "vscode:prepublish": "npm run build"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
+    "concurrently": "^8.2.2",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "mocha": "^10.2.0",
+    "prettier": "^3.2.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

@@ -1,0 +1,31 @@
+# Code Explorer — Foreman Configuration
+# Runs the Markdown Viewer for browsing project documentation.
+#
+# Usage:
+#   foreman -c foreman.yaml
+#   Open http://127.0.0.1:9090
+
+project_root: .
+env_file: .env
+password: "${FOREMAN_PASSWORD:-admin}"
+port: 9095
+host: 0.0.0.0
+log_retention_lines: 10000
+log_file: logs/foreman.log
+
+services:
+  markdown-viewer:
+    label: "Markdown Viewer (:${MARKDOWN_VIEWER_PORT:-9966})"
+    group: tools
+    url: "http://${SSH_REMOTE_IP:-localhost}:${SSH_MARKDOWN_VIEWER_FORWARD_PORT:-6007}"
+    binary_source: "https://github.com/roraja/markdown-go/releases/tag/v1.11.1"
+    binary_name: mdviewer
+    args:
+      - "--port"
+      - "${MARKDOWN_VIEWER_PORT:-9966}"
+    auto_start: true
+    env:
+      PODCAST_API_URL: ""
+      PODCAST_API_TOKEN: ""
+      PODCAST_MODEL: ""
+      PODCAST_LLM_TIMEOUT: "600"

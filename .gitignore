@@ -1,0 +1,26 @@
+.env
+
+docs/**/*.mp3
+docs/**/*-script.txt
+
+logs
+tmp
+
+# Build outputs
+dist/
+out/
+webview/dist/
+*.vsix
+
+# Dependencies
+node_modules/
+
+# VS Code test runner
+.vscode-test/
+
+# Code Explorer cache (machine-specific analysis)
+.vscode/code-explorer/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -222,7 +222,123 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+
+      case 'exploreSymbol': {
+        logger.info(`ViewProvider: exploreSymbol "${message.symbolName}" in ${message.filePath || 'unknown'}`);
+        this._exploreSymbolByName(message.symbolName, message.filePath, message.line, message.kind);
+        break;
+      }
     }
+  }
+
+  private async _exploreSymbolByName(
+    symbolName: string,
+    filePath?: string,
+    line?: number,
+    kind?: string
+  ): Promise<void> {
+    try {
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceRoot) {
+        return;
+      }
+
+      // If we have a file path and line, resolve the symbol at that location
+      if (filePath && line) {
+        const uri = vscode.Uri.file(`${workspaceRoot}/${filePath}`);
+        try {
+          const doc = await vscode.workspace.openTextDocument(uri);
+          const position = new vscode.Position(Math.max(0, line - 1), 0);
+
+          // Try to find the symbol in the document's symbols
+          const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+            'vscode.executeDocumentSymbolProvider',
+            doc.uri
+          );
+
+          const found = this._findSymbolInTree(symbols || [], symbolName);
+          if (found) {
+            const symbolInfo: SymbolInfo = {
+              name: found.name,
+              kind: (kind as SymbolInfo['kind']) || this._vscodeKindToString(found.kind),
+              filePath,
+              position: { line: found.range.start.line, character: found.range.start.character },
+              range: {
+                start: { line: found.range.start.line, character: found.range.start.character },
+                end: { line: found.range.end.line, character: found.range.end.character },
+              },
+            };
+            this.openTab(symbolInfo);
+            return;
+          }
+
+          // Fallback: use the line position
+          const symbolInfo: SymbolInfo = {
+            name: symbolName,
+            kind: (kind as SymbolInfo['kind']) || 'function',
+            filePath,
+            position: { line: position.line, character: 0 },
+          };
+          this.openTab(symbolInfo);
+        } catch (err) {
+          logger.warn(`ViewProvider._exploreSymbolByName: failed to open ${filePath}: ${err}`);
+        }
+      } else {
+        // No file path — use workspace symbol search
+        const wsSymbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
+          'vscode.executeWorkspaceSymbolProvider',
+          symbolName
+        );
+
+        if (wsSymbols && wsSymbols.length > 0) {
+          const match = wsSymbols.find((s) => s.name === symbolName) || wsSymbols[0];
+          const relPath = vscode.workspace.asRelativePath(match.location.uri);
+          const symbolInfo: SymbolInfo = {
+            name: match.name,
+            kind: this._vscodeKindToString(match.kind),
+            filePath: relPath,
+            position: {
+              line: match.location.range.start.line,
+              character: match.location.range.start.character,
+            },
+          };
+          this.openTab(symbolInfo);
+        } else {
+          logger.warn(`ViewProvider._exploreSymbolByName: symbol "${symbolName}" not found in workspace`);
+        }
+      }
+    } catch (err) {
+      logger.error(`ViewProvider._exploreSymbolByName: ${err}`);
+    }
+  }
+
+  private _findSymbolInTree(
+    symbols: vscode.DocumentSymbol[],
+    name: string
+  ): vscode.DocumentSymbol | undefined {
+    for (const sym of symbols) {
+      if (sym.name === name) {
+        return sym;
+      }
+      const child = this._findSymbolInTree(sym.children || [], name);
+      if (child) {
+        return child;
+      }
+    }
+    return undefined;
+  }
+
+  private _vscodeKindToString(kind: vscode.SymbolKind): SymbolInfo['kind'] {
+    const map: Record<number, SymbolInfo['kind']> = {
+      [vscode.SymbolKind.Class]: 'class',
+      [vscode.SymbolKind.Function]: 'function',
+      [vscode.SymbolKind.Method]: 'method',
+      [vscode.SymbolKind.Variable]: 'variable',
+      [vscode.SymbolKind.Interface]: 'interface',
+      [vscode.SymbolKind.Enum]: 'enum',
+      [vscode.SymbolKind.Property]: 'property',
+    };
+    return map[kind] || 'unknown';
   }
 
   private async _navigateToSource(

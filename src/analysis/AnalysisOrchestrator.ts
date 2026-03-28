@@ -82,6 +82,11 @@ export class AnalysisOrchestrator {
               potentialIssues: cached.potentialIssues,
               variableLifecycle: cached.variableLifecycle,
               dataFlow: cached.dataFlow,
+              functionSteps: cached.functionSteps,
+              subFunctions: cached.subFunctions,
+              functionInputs: cached.functionInputs,
+              functionOutput: cached.functionOutput,
+              relatedSymbols: cached.relatedSymbols,
             };
             cachedMeta = cached.metadata;
             logger.logLLMStep(
@@ -216,6 +221,10 @@ export class AnalysisOrchestrator {
       usagePattern: llmResult.usagePattern,
       potentialIssues: llmResult.potentialIssues,
       variableLifecycle: llmResult.variableLifecycle,
+      functionSteps: llmResult.functionSteps,
+      subFunctions: llmResult.subFunctions,
+      functionInputs: llmResult.functionInputs,
+      functionOutput: llmResult.functionOutput,
       metadata: {
         analyzedAt: new Date().toISOString(),
         sourceHash: '',
@@ -245,6 +254,65 @@ export class AnalysisOrchestrator {
 
     this._onAnalysisComplete.fire(result);
     return result;
+  }
+
+  /**
+   * Pre-cache related symbols discovered by the LLM during analysis.
+   * Only writes cache entries for symbols that don't already have one,
+   * so existing (potentially richer) analyses are never overwritten.
+   */
+  private async _cacheRelatedSymbols(
+    relatedSymbols: RelatedSymbolAnalysis[],
+    llmProviderName: string | undefined
+  ): Promise<void> {
+    for (const related of relatedSymbols) {
+      const relatedSymbolInfo: SymbolInfo = {
+        name: related.name,
+        kind: related.kind,
+        filePath: related.filePath,
+        position: { line: related.line, character: 0 },
+      };
+
+      // Skip if already cached — don't overwrite richer analyses
+      try {
+        const existing = await this._cache.read(relatedSymbolInfo);
+        if (existing && !existing.metadata.stale) {
+          logger.debug(
+            `Orchestrator: skipping pre-cache for "${related.name}" — already cached`
+          );
+          continue;
+        }
+      } catch {
+        // Cache read error — proceed to write
+      }
+
+      const relatedResult: AnalysisResult = {
+        symbol: relatedSymbolInfo,
+        overview: related.overview,
+        callStacks: [],
+        usages: [],
+        dataFlow: [],
+        relationships: [],
+        keyMethods: related.keyPoints,
+        dependencies: related.dependencies,
+        potentialIssues: related.potentialIssues,
+        metadata: {
+          analyzedAt: new Date().toISOString(),
+          sourceHash: '',
+          dependentFileHashes: {},
+          llmProvider: llmProviderName,
+          analysisVersion: ANALYSIS_VERSION,
+          stale: false,
+        },
+      };
+
+      try {
+        await this._cache.write(relatedResult);
+        logger.info(`Orchestrator: pre-cached related symbol "${related.name}" in ${related.filePath}`);
+      } catch (err) {
+        logger.debug(`Orchestrator: failed to pre-cache "${related.name}": ${err}`);
+      }
+    }
   }
 
   dispose(): void {

@@ -218,7 +218,7 @@ export const logger = {
         `## Agent Progress\n\n`;
 
       fs.writeFileSync(_activeLLMLogFile, header, 'utf-8');
-      emit(LogLevel.DEBUG, `LLM call log started: ${fileName}`, []);
+      emit(LogLevel.INFO, `LLM call log: ${_activeLLMLogFile}`, []);
     } catch {
       _activeLLMLogFile = undefined;
       emit(LogLevel.WARN, `Failed to start LLM call log for "${symbolName}"`, []);

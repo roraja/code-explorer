@@ -117,6 +117,16 @@ export interface AnalysisResult {
   potentialIssues?: string[];
   /** Variable lifecycle (for variables) */
   variableLifecycle?: VariableLifecycle;
+  /** Numbered steps describing what this function does */
+  functionSteps?: FunctionStep[];
+  /** Sub-functions called by this symbol, with details */
+  subFunctions?: SubFunctionInfo[];
+  /** Function/method input parameters with type details and mutation info */
+  functionInputs?: FunctionInputParam[];
+  /** Function/method return type with structural details */
+  functionOutput?: FunctionOutputInfo;
+  /** Brief LLM analyses of related symbols for pre-caching */
+  relatedSymbols?: RelatedSymbolAnalysis[];
   /** Metadata for cache management */
   metadata: AnalysisMetadata;
 }
@@ -196,6 +206,78 @@ export interface RelationshipEntry {
 }
 
 /**
+ * A single step in a function's numbered breakdown.
+ */
+export interface FunctionStep {
+  /** Step number (1-based) */
+  step: number;
+  /** Description of what this step does */
+  description: string;
+}
+
+/**
+ * Details about a sub-function called by the analyzed symbol.
+ */
+export interface SubFunctionInfo {
+  /** Name of the sub-function */
+  name: string;
+  /** What the sub-function does */
+  description: string;
+  /** Input parameters description */
+  input: string;
+  /** Return value description */
+  output: string;
+  /** File path where the sub-function is defined */
+  filePath?: string;
+  /** Line number of the sub-function's definition */
+  line?: number;
+  /** Kind of the sub-function symbol */
+  kind?: string;
+}
+
+/**
+ * A single input parameter of a function/method, with structural details.
+ */
+export interface FunctionInputParam {
+  /** Parameter name */
+  name: string;
+  /** Type annotation (e.g., "SymbolInfo", "string[]") */
+  typeName: string;
+  /** Brief explanation of what this parameter represents */
+  description: string;
+  /** Whether the function mutates this parameter (calls non-const methods, reassigns properties) */
+  mutated: boolean;
+  /** If mutated, describe how (e.g., "calls .push()", "sets .status property") */
+  mutationDetail?: string;
+  /** File path where the type is defined (for linking to its analysis) */
+  typeFilePath?: string;
+  /** Line number of the type definition */
+  typeLine?: number;
+  /** Kind of the type symbol */
+  typeKind?: string;
+  /** Brief overview of the type structure */
+  typeOverview?: string;
+}
+
+/**
+ * Return type details of a function/method.
+ */
+export interface FunctionOutputInfo {
+  /** Type annotation (e.g., "Promise<AnalysisResult>", "void") */
+  typeName: string;
+  /** Brief explanation of what is returned */
+  description: string;
+  /** File path where the return type is defined (for linking) */
+  typeFilePath?: string;
+  /** Line number of the type definition */
+  typeLine?: number;
+  /** Kind of the type symbol */
+  typeKind?: string;
+  /** Brief overview of the return type structure */
+  typeOverview?: string;
+}
+
+/**
  * Variable lifecycle analysis (AI-generated).
  */
 export interface VariableLifecycle {
@@ -209,6 +291,30 @@ export interface VariableLifecycle {
   consumption: string[];
   /** Scope and garbage collection eligibility */
   scopeAndLifetime: string;
+}
+
+/**
+ * A brief analysis of a related symbol encountered during LLM analysis.
+ * Used to pre-cache analyses for symbols the LLM discovers while
+ * analyzing the primary symbol, saving future LLM calls.
+ */
+export interface RelatedSymbolAnalysis {
+  /** Symbol name */
+  name: string;
+  /** Symbol kind */
+  kind: SymbolKindType;
+  /** File where the symbol is defined */
+  filePath: string;
+  /** Line number of the symbol definition */
+  line: number;
+  /** Brief overview of the symbol */
+  overview: string;
+  /** Key points about the symbol */
+  keyPoints?: string[];
+  /** Dependencies of the symbol */
+  dependencies?: string[];
+  /** Potential issues with the symbol */
+  potentialIssues?: string[];
 }
 
 // =====================
@@ -411,7 +517,8 @@ export type WebviewToExtensionMessage =
   | { type: 'tabClosed'; tabId: string }
   | { type: 'refreshRequested'; tabId: string }
   | { type: 'navigateToSource'; filePath: string; line: number; character: number }
-  | { type: 'retryAnalysis'; tabId: string };
+  | { type: 'retryAnalysis'; tabId: string }
+  | { type: 'exploreSymbol'; symbolName: string; filePath?: string; line?: number; kind?: string };
 
 // =====================
 // Queued Analysis

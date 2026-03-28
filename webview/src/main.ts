@@ -169,6 +169,87 @@ function renderAnalysis(tab: Tab): string {
     sections.push(renderSection('Overview', `<p class="overview-text">${esc(a.overview)}</p>`));
   }
 
+  // Step-by-Step Breakdown (numbered functionalities)
+  if (a.functionSteps && a.functionSteps.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items = a.functionSteps.map((s: any) =>
+      `<li class="step-item"><span class="step-item__number">${s.step}.</span> ${esc(s.description)}</li>`
+    ).join('');
+    sections.push(renderSection('Step-by-Step Breakdown', `<ol class="step-list">${items}</ol>`));
+  }
+
+  // Sub-Functions
+  if (a.subFunctions && a.subFunctions.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items = a.subFunctions.map((sf: any) => {
+      const linkAttrs = sf.filePath
+        ? ` data-symbol-name="${esc(sf.name)}" data-symbol-file="${esc(sf.filePath)}" data-symbol-line="${sf.line || 0}" data-symbol-kind="${esc(sf.kind || 'function')}"`
+        : '';
+      const nameHtml = sf.filePath
+        ? `<a class="symbol-link" href="#"${linkAttrs}>${esc(sf.name)}</a>`
+        : `<strong>${esc(sf.name)}</strong>`;
+      return `<div class="subfunction-item">
+        <div class="subfunction-item__header">${nameHtml}</div>
+        <div class="subfunction-item__desc">${esc(sf.description)}</div>
+        <div class="subfunction-item__io">
+          <span class="subfunction-item__label">Input:</span> <span>${esc(sf.input)}</span>
+        </div>
+        <div class="subfunction-item__io">
+          <span class="subfunction-item__label">Output:</span> <span>${esc(sf.output)}</span>
+        </div>
+        ${sf.filePath ? `<div class="subfunction-item__file">${esc(shortPath(sf.filePath))}${sf.line ? ':' + sf.line : ''}</div>` : ''}
+      </div>`;
+    }).join('');
+    sections.push(renderSection(`Sub-Functions (${a.subFunctions.length})`, `<div class="subfunction-list">${items}</div>`));
+  }
+
+  // Function Input
+  if (a.functionInputs && a.functionInputs.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items = a.functionInputs.map((p: any) => {
+      const typeLinkAttrs = p.typeFilePath
+        ? ` data-symbol-name="${esc(p.typeName)}" data-symbol-file="${esc(p.typeFilePath)}" data-symbol-line="${p.typeLine || 0}" data-symbol-kind="${esc(p.typeKind || 'type')}"`
+        : '';
+      const typeHtml = p.typeFilePath
+        ? `<a class="symbol-link" href="#"${typeLinkAttrs}>${esc(p.typeName)}</a>`
+        : `<code>${esc(p.typeName)}</code>`;
+      const mutatedBadge = p.mutated
+        ? `<span class="badge badge--mutated" title="${esc(p.mutationDetail || 'Mutates this parameter')}">⚡ mutated</span>`
+        : '<span class="badge badge--readonly">readonly</span>';
+      return `<div class="fn-param-item">
+        <div class="fn-param-item__header">
+          <span class="fn-param-item__name">${esc(p.name)}</span>
+          <span class="fn-param-item__type">${typeHtml}</span>
+          ${mutatedBadge}
+        </div>
+        <div class="fn-param-item__desc">${esc(p.description)}</div>
+        ${p.mutated && p.mutationDetail ? `<div class="fn-param-item__mutation">⚡ ${esc(p.mutationDetail)}</div>` : ''}
+        ${p.typeOverview ? `<div class="fn-param-item__type-overview">${esc(p.typeOverview)}</div>` : ''}
+      </div>`;
+    }).join('');
+    sections.push(renderSection(`Function Input (${a.functionInputs.length})`, `<div class="fn-param-list">${items}</div>`));
+  }
+
+  // Function Output
+  if (a.functionOutput && a.functionOutput.typeName) {
+    const out = a.functionOutput;
+    const typeLinkAttrs = out.typeFilePath
+      ? ` data-symbol-name="${esc(out.typeName)}" data-symbol-file="${esc(out.typeFilePath)}" data-symbol-line="${out.typeLine || 0}" data-symbol-kind="${esc(out.typeKind || 'type')}"`
+      : '';
+    const typeHtml = out.typeFilePath
+      ? `<a class="symbol-link" href="#"${typeLinkAttrs}>${esc(out.typeName)}</a>`
+      : `<code>${esc(out.typeName)}</code>`;
+    const content = `<div class="fn-output-item">
+      <div class="fn-output-item__header">
+        <span class="fn-output-item__label">Returns:</span>
+        <span class="fn-output-item__type">${typeHtml}</span>
+      </div>
+      <div class="fn-output-item__desc">${esc(out.description)}</div>
+      ${out.typeOverview ? `<div class="fn-output-item__type-overview">${esc(out.typeOverview)}</div>` : ''}
+    </div>`;
+    sections.push(renderSection('Function Output', content));
+  }
+
   // Key methods / points
   if (a.keyMethods && a.keyMethods.length > 0) {
     const items = a.keyMethods.map((m: string) => `<li>${esc(m)}</li>`).join('');
@@ -198,8 +279,11 @@ function renderAnalysis(tab: Tab): string {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((c: any) => {
         const chain = c.chain || `${c.caller.name} → ${tab.symbol.name}`;
+        const nameHtml = c.caller.filePath
+          ? `<a class="symbol-link" href="#" data-symbol-name="${esc(c.caller.name)}" data-symbol-file="${esc(c.caller.filePath)}" data-symbol-line="${c.caller.line || 0}" data-symbol-kind="${esc(c.caller.kind || 'function')}">${esc(c.caller.name)}</a>`
+          : `<strong>${esc(c.caller.name)}</strong>`;
         return `<li class="callstack-item">
-          <strong>${esc(c.caller.name)}</strong>
+          ${nameHtml}
           <span class="callstack-item__file">${esc(shortPath(c.caller.filePath))}:${c.caller.line}</span>
           <div class="callstack-item__chain">${esc(chain)}</div>
         </li>`;
@@ -298,6 +382,20 @@ function attachListeners(): void {
       const character = parseInt(row.dataset.char || '0', 10);
       if (filePath) {
         vscode.postMessage({ type: 'navigateToSource', filePath, line, character });
+      }
+    });
+  });
+
+  document.querySelectorAll('.symbol-link').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      const link = el as HTMLElement;
+      const symbolName = link.dataset.symbolName;
+      const filePath = link.dataset.symbolFile;
+      const line = parseInt(link.dataset.symbolLine || '0', 10);
+      const kind = link.dataset.symbolKind || 'function';
+      if (symbolName) {
+        vscode.postMessage({ type: 'exploreSymbol', symbolName, filePath, line: line || undefined, kind });
       }
     });
   });

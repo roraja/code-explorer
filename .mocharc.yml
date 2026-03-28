@@ -1,5 +1,6 @@
 spec: "test/unit/**/*.test.ts"
 require:
+  - test/setup.js
   - ts-node/register
 timeout: 5000
 ui: tdd

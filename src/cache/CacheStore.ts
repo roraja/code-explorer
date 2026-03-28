@@ -11,7 +11,7 @@
  */
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { AnalysisResult, SymbolInfo, AnalysisMetadata } from '../models/types';
+import type { AnalysisResult, SymbolInfo, AnalysisMetadata, CallStackEntry, UsageEntry } from '../models/types';
 import { SYMBOL_KIND_PREFIX } from '../models/types';
 import { CACHE, ANALYSIS_VERSION } from '../models/constants';
 import { logger } from '../utils/logger';
@@ -171,19 +171,29 @@ export class CacheStore {
       lines.push('');
     }
 
-    // Call Stacks
+    // Callers — human-readable list + machine-parseable JSON block
     if (result.callStacks.length > 0) {
-      lines.push('## Call Stacks');
+      lines.push('## Callers');
       lines.push('');
       for (let i = 0; i < result.callStacks.length; i++) {
         const cs = result.callStacks[i];
         const chain = cs.chain || `${cs.caller.name} → ${s.name}`;
-        lines.push(`### ${i + 1}. ${cs.caller.name}`);
-        lines.push('```');
-        lines.push(chain);
-        lines.push('```');
-        lines.push('');
+        lines.push(`${i + 1}. **${cs.caller.name}** — \`${cs.caller.filePath}:${cs.caller.line}\` — ${chain}`);
       }
+      lines.push('');
+
+      // Structured JSON block for machine consumption
+      const callersJson = result.callStacks.map((cs) => ({
+        name: cs.caller.name,
+        filePath: cs.caller.filePath,
+        line: cs.caller.line,
+        kind: cs.caller.kind,
+        context: cs.chain || `${cs.caller.name} → ${s.name}`,
+      }));
+      lines.push('```json:callers');
+      lines.push(JSON.stringify(callersJson, null, 2));
+      lines.push('```');
+      lines.push('');
     }
 
     // Usages
@@ -284,13 +294,16 @@ export class CacheStore {
         stale: fm['stale'] === 'true',
       };
 
+      // Parse callers from json:callers block
+      const { callStacks, usages } = this._parseCallersJson(body);
+
       return {
         symbol,
         overview: sections['overview'] || '',
-        callStacks: [], // call stacks are re-gathered from static analysis
-        usages: [], // usages are re-gathered from static analysis
+        callStacks,
+        usages,
         dataFlow: [],
-        relationships: [], // relationships are re-gathered
+        relationships: [],
         keyMethods: this._parseList(sections['key points']),
         dependencies: this._parseList(sections['dependencies']),
         usagePattern: sections['usage pattern'] || '',
@@ -340,6 +353,57 @@ export class CacheStore {
       sections[lastKey] = markdown.substring(lastIndex).trim();
     }
     return sections;
+  }
+
+  /**
+   * Parse the ```json:callers ... ``` block from cached markdown
+   * into CallStackEntry[] and UsageEntry[].
+   */
+  private _parseCallersJson(
+    body: string
+  ): { callStacks: CallStackEntry[]; usages: UsageEntry[] } {
+    const callStacks: CallStackEntry[] = [];
+    const usages: UsageEntry[] = [];
+
+    const match = body.match(/```json:callers\s*\n([\s\S]*?)\n\s*```/);
+    if (!match) {
+      return { callStacks, usages };
+    }
+
+    try {
+      const entries = JSON.parse(match[1]);
+      if (!Array.isArray(entries)) {
+        return { callStacks, usages };
+      }
+
+      for (const entry of entries) {
+        if (!entry.name || !entry.filePath) {
+          continue;
+        }
+        callStacks.push({
+          caller: {
+            name: entry.name,
+            filePath: entry.filePath,
+            line: entry.line || 0,
+            kind: entry.kind || 'function',
+          },
+          callSites: [{ line: entry.line || 0, character: 0 }],
+          depth: 0,
+          chain: entry.context || `${entry.name} → calls this symbol`,
+        });
+        usages.push({
+          filePath: entry.filePath,
+          line: entry.line || 0,
+          character: 0,
+          contextLine: entry.context || '',
+          isDefinition: false,
+        });
+      }
+    } catch (err) {
+      logger.warn(`CacheStore._parseCallersJson: parse error: ${err}`);
+    }
+
+    return { callStacks, usages };
   }
 
   /**

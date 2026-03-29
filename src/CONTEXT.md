@@ -13,14 +13,18 @@ Root of the extension host source code. All modules here run in Node.js with acc
    - Calls `llmProvider.setWorkspaceRoot(workspaceRoot)` if available — sets CLI working directory for full workspace context
    - `new StaticAnalyzer()`
    - `new CacheStore(workspaceRoot)`
-   - `new AnalysisOrchestrator(staticAnalyzer, llmProvider, cacheStore)`
+   - `new AnalysisOrchestrator(staticAnalyzer, llmProvider, cacheStore, workspaceRoot)`
    - `new CodeExplorerViewProvider(extensionUri, orchestrator)`
 5. Registers the webview view provider for `codeExplorer.sidebar`
-6. Registers four commands:
+6. Registers eight commands:
    - `codeExplorer.exploreSymbol` — gathers `CursorContext` from editor, opens tab via `openTabFromCursor()`. Falls back to `openTab()` for programmatic calls with pre-resolved `SymbolInfo`.
+   - `codeExplorer.exploreFileSymbols` — analyzes all symbols in the current file via `orchestrator.analyzeFile()`
    - `codeExplorer.refreshAnalysis` — placeholder (shows info message)
    - `codeExplorer.clearCache` — deletes all cache files after confirmation
    - `codeExplorer.analyzeWorkspace` — stub (shows "future release" message)
+   - `codeExplorer.installGlobalSkills` — installs Claude + Copilot analysis skills via `SkillInstaller`
+   - `codeExplorer.pullAdoContent` — pulls Code Explorer content from ADO via `pullAdoContent()`
+   - `codeExplorer.pushAdoContent` — pushes Code Explorer content to ADO via `pushAdoContent()`
 
 **Note**: `SymbolResolver` is **no longer imported** by `extension.ts`. Symbol resolution is handled by the LLM via the unified prompt. The file `src/providers/SymbolResolver.ts` is preserved for potential future use.
 
@@ -35,6 +39,8 @@ extension.ts
   +-- analysis/AnalysisOrchestrator.ts
   +-- cache/CacheStore.ts
   +-- llm/LLMProviderFactory.ts
+  +-- skills/SkillInstaller.ts
+  +-- git/AdoSync.ts
   +-- utils/logger.ts
 ```
 
@@ -50,3 +56,5 @@ extension.ts
 | `cache/` | Markdown cache read/write | `CacheStore.ts`, `CacheWriter.ts` |
 | `ui/` | Webview provider | `CodeExplorerViewProvider.ts` |
 | `utils/` | Logger, CLI runner | `logger.ts`, `cli.ts` |
+| `skills/` | Global skill installer (Claude + Copilot) | `SkillInstaller.ts` |
+| `git/` | ADO content sync | `AdoSync.ts` |

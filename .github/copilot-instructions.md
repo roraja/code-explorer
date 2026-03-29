@@ -53,7 +53,7 @@ Communication is via `postMessage`. Message types defined in `src/models/types.t
 - **mai-claude provider**: Must `delete env.CLAUDECODE` before spawning `claude` CLI, otherwise it refuses to start inside a Claude Code session.
 - **copilot-cli provider**: Does not support `--append-system-prompt`; system instructions go in the prompt text. Uses `--yolo -s` flags.
 - **Webview imports**: Cannot import from `src/` — webview redefines its own interfaces locally.
-- **Cache path**: `.vscode/code-explorer/` in workspace root. Log files at `.vscode/code-explorer/logs/YYYY-MM-DD.log`. LLM call logs at `.vscode/code-explorer/logs/llms/`.
+- **Cache path**: `.vscode/code-explorer/` in workspace root. Log files at `.vscode/code-explorer-logs/YYYY-MM-DD.log`. LLM call logs at `.vscode/code-explorer-logs/llms/`.
 - **Static analysis methods**: `StaticAnalyzer.findReferences()`, `buildCallHierarchy()`, `getTypeHierarchy()` exist but are **not currently called** by the orchestrator — only LLM-generated data is used.
 - **CacheWriter vs CacheStore**: `CacheWriter.ts` is an earlier/alternative writer. The main pipeline uses `CacheStore.ts` for both read and write.
 

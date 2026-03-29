@@ -9,10 +9,10 @@ Per-symbol-kind prompt strategies. Each strategy builds a prompt tailored to ana
 | File | Symbol Kinds | Focus |
 |------|-------------|-------|
 | `PromptStrategy.ts` | — | Interface definition + `PromptContext` type |
-| `FunctionPromptStrategy.ts` | `function`, `method` | Step-by-step breakdown, sub-functions, inputs/outputs, callers |
-| `ClassPromptStrategy.ts` | `class`, `struct`, `interface`, `enum` | Class structure, member analysis, member access patterns, lifecycle |
-| `VariablePromptStrategy.ts` | `variable` | Data mutation tracking, variable lifecycle, data flow, data kind |
-| `PropertyPromptStrategy.ts` | `property` | Member access patterns, mutation tracking, encapsulation |
+| `FunctionPromptStrategy.ts` | `function`, `method` | Step-by-step breakdown, sub-functions, inputs/outputs, callers, diagrams |
+| `ClassPromptStrategy.ts` | `class`, `struct`, `interface`, `enum` | Class structure, member analysis, member access patterns, lifecycle, diagrams |
+| `VariablePromptStrategy.ts` | `variable` | Data mutation tracking, variable lifecycle, data flow, data kind, diagrams |
+| `PropertyPromptStrategy.ts` | `property` | Member access patterns, mutation tracking, encapsulation, diagrams |
 
 ## Strategy Interface
 
@@ -56,10 +56,20 @@ This convention allows `ResponseParser` to extract machine-readable data from th
 | Variable Lifecycle (`json:variable_lifecycle`) | No | No | Yes | Yes |
 | Data Flow (`json:data_flow`) | No | No | Yes | Yes |
 | Callers (`json:callers`) | Yes | Yes | Yes | Yes |
+| Diagrams (`json:diagrams`) | Yes | Yes | Yes | Yes |
 | Dependencies | Yes | Yes | Yes | Yes |
 | Usage Pattern | Yes | Yes | Yes | Yes |
 | Potential Issues | Yes | Yes | Yes | Yes |
 | Related Symbols (`json:related_symbols`) | Yes | Yes | Yes | Yes |
+
+### Diagram Types by Strategy
+
+| Strategy | Diagram Types Requested |
+|----------|------------------------|
+| Function | Flowchart (execution path), sequence diagram (sub-function interactions) |
+| Class | Class diagram (relationships), flowchart (lifecycle) |
+| Variable | Flowchart (data flow lifecycle) |
+| Property | Flowchart (member access flow) |
 
 ## Adding a New Strategy
 
@@ -67,3 +77,4 @@ This convention allows `ResponseParser` to extract machine-readable data from th
 2. Register in `STRATEGY_MAP` in `src/llm/PromptBuilder.ts`
 3. Add any new JSON block tags to `ResponseParser.ts` parsing methods
 4. Add corresponding interfaces to `src/models/types.ts` if new data shapes are needed
+5. Include a `### Diagrams` section requesting appropriate mermaid diagram types

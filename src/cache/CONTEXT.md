@@ -16,7 +16,7 @@ Each analyzed symbol gets a markdown file at:
 .vscode/code-explorer/<source-path>/<scope-chain>.<kind>.<Name>.md
 ```
 
-Example: `.vscode/code-explorer/src/main.cpp/fn.printBanner().md`
+Example: `.vscode/code-explorer/src/main.cpp/fn.printBanner.md`
 
 ### Structure
 
@@ -52,8 +52,58 @@ stale: false
 [{"name": "main", "filePath": "src/main.cpp", "line": 42, ...}]
 ```
 
+## Diagrams
+
+### Execution Flow
+
+```mermaid
+flowchart TD
+  A[Start] --> B{Validate}
+  B -->|ok| C[Process]
+```
+
+```json:diagrams
+[{"title": "Execution Flow", "type": "flowchart", "mermaidSource": "..."}]
+```
+
+## Q&A
+
+### Q: How does error handling work?
+*3/29/2026, 8:00:00 AM*
+
+The function uses try/catch blocks to...
+
+```json:qa_history
+[{"question": "...", "answer": "...", "timestamp": "..."}]
+```
+
 ...more sections...
 ```
+
+## Serialized Sections
+
+The `_serialize()` method writes sections in this order:
+
+1. YAML frontmatter (symbol, kind, file, line, scope_chain, analyzed_at, etc.)
+2. Overview
+3. Key Points
+4. Callers (human-readable + `json:callers`)
+5. Usages
+6. Relationships
+7. Data Flow (human-readable + `json:data_flow`)
+8. Variable Lifecycle (`json:variable_lifecycle`)
+9. Data Kind (`json:data_kind`)
+10. Class Members (human-readable + `json:class_members`)
+11. Member Access Patterns (`json:member_access`)
+12. Diagrams (mermaid fences + `json:diagrams`)
+13. Function Steps (human-readable + `json:steps`)
+14. Sub-Functions (human-readable + `json:subfunctions`)
+15. Function Input (`json:function_inputs`)
+16. Function Output (`json:function_output`)
+17. Dependencies
+18. Usage Pattern
+19. Potential Issues
+20. Q&A History (human-readable + `json:qa_history`)
 
 ## Read Methods
 
@@ -70,21 +120,15 @@ Used by the primary `analyzeFromCursor` flow where the symbol kind is not yet kn
 3. Matches if symbol name equals `word` AND line is within **±3 lines** of cursor
 4. Returns `{ symbol: SymbolInfo, result: AnalysisResult } | null`
 
-Includes extensive debug logging at every step (directory listing, each file checked, name/line comparisons, match details).
-
 ### `listCachedSymbols(filePath)` — Lightweight Metadata Scan
 
-Lists all cached symbols for a given source file by reading YAML frontmatter + a short overview snippet (~150 chars) from each `.md` cache file. Returns `CachedSymbolSummary[]`. Used by the LLM-assisted cache fallback to describe available cached symbols to the LLM.
+Lists all cached symbols for a given source file by reading YAML frontmatter + a short overview snippet (~150 chars) from each `.md` cache file. Returns `CachedSymbolSummary[]`. Used by the LLM-assisted cache fallback.
 
 ### `findByCursorWithLLMFallback(cursor, workspaceRoot)` — Smart Cache Lookup
 
-Two-tier cache lookup used as the primary entry point in `analyzeFromCursor`:
-
-1. **Tier 1**: Calls `findByCursor(word, filePath, cursorLine)` — fast, exact name + ±3 lines.
-2. **Tier 2** (on miss): If `listCachedSymbols` finds any cached symbols for this file, sends a **lightweight Copilot CLI call** (30s timeout, `--yolo -s`) with the cursor context and a numbered list of cached symbol descriptions. The LLM outputs a `json:cache_match` block identifying which cached symbol (if any) matches the cursor. On match, deserializes and returns the cached result.
-3. If both tiers miss, returns `null` — the orchestrator proceeds with full LLM analysis.
-
-The Tier 2 LLM call is cheap and fast because it only asks the LLM to match against a short list of descriptions — no code analysis is performed. This avoids expensive full re-analysis when the user clicks on a reference/usage of a previously-analyzed symbol, or when line numbers have shifted slightly due to edits.
+Two-tier cache lookup:
+1. **Tier 1**: `findByCursor()` — fast, exact name + ±3 lines.
+2. **Tier 2** (on miss): Lightweight Copilot CLI call with cached symbol descriptions. LLM outputs `json:cache_match` to pick the best match.
 
 ## Cache Key Resolution
 
@@ -93,18 +137,12 @@ The Tier 2 LLM call is cheap and fast because it only asks the LLM to match agai
 2. **Container name** (fallback): `Container.kind.Name`
 3. **Name only**: `kind.Name`
 
-This ensures local variables in different functions get distinct cache files.
+## Deserialization
 
-## Serialization Round-Trip
-
-| Write (`_serialize`) | Read (`_deserialize`) |
-|---------------------|----------------------|
-| YAML frontmatter with metadata | `_parseFrontmatter()` extracts key-value pairs |
-| Markdown sections with headings | `_extractSections()` keys by heading text |
-| `json:callers` fenced blocks | `_parseCallersJson()` |
-| `json:data_flow`, `json:class_members`, `json:member_access` | `_parseJsonBlock<T>()` |
-| `json:variable_lifecycle`, `json:data_kind` | `_parseJsonObjectBlock<T>()` |
-| Bullet lists (key points, deps, issues) | `_parseList()` |
+The `_deserialize()` method parses:
+- YAML frontmatter → metadata fields
+- Section headings → key-value map
+- Tagged JSON blocks → typed arrays/objects: callers, steps, subfunctions, function_inputs, function_output, data_flow, variable_lifecycle, data_kind, class_members, member_access, diagrams, qa_history
 
 ## Not Yet Implemented
 

@@ -82,7 +82,7 @@ If the LLM is unavailable or fails, the orchestrator returns a result with place
 - **`src/models/types.ts`** — Single source of truth for all interfaces: `SymbolInfo`, `AnalysisResult`, `TabState`, message types, cache types, LLM types. Includes `SYMBOL_KIND_PREFIX` map.
 - **`src/models/errors.ts`** — `CodeExplorerError` hierarchy with `ErrorCode` enum. Subclasses: `LLMError`, `CacheError`, `AnalysisError`, `SystemError`.
 - **`src/models/constants.ts`** — Extension IDs, command names, config keys, cache constants, queue defaults, supported languages.
-- **`src/utils/logger.ts`** — Dual-output logger: VS Code OutputChannel + daily log files. Also manages per-LLM-call markdown log files at `.vscode/code-explorer/logs/llms/`. Must call `logger.init(workspaceRoot)` during activation.
+- **`src/utils/logger.ts`** — Dual-output logger: VS Code OutputChannel + daily log files. Also manages per-LLM-call markdown log files at `.vscode/code-explorer-logs/llms/`. Must call `logger.init(workspaceRoot)` during activation.
 - **`webview/src/main.ts`** — Vanilla TS (no React). Pure renderer. Renders tab bar, analysis sections (collapsible `<details>`), empty/loading/error states. Supports symbol linking (click sub-function/caller to explore) and navigate-to-source. All CSS uses VS Code theme variables.
 
 ## Conventions

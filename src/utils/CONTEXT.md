@@ -16,8 +16,9 @@ Singleton-style module (not a class). Must call `logger.init(workspaceRoot)` dur
 ### Output Destinations
 
 1. **VS Code OutputChannel** — visible in Output panel as "Code Explorer"
-2. **Daily log file** — `<workspace>/.vscode/code-explorer/logs/YYYY-MM-DD.log`
-3. **Per-LLM-call markdown** — `<workspace>/.vscode/code-explorer/logs/llms/NN-symbolName-call.md`
+2. **Daily log file** — `<workspace>/.vscode/code-explorer-logs/YYYY-MM-DD.log`
+3. **Per-LLM-call markdown** — `<workspace>/.vscode/code-explorer-logs/llms/NN-symbolName-call.md`
+4. **Per-command log file** — `<workspace>/.vscode/code-explorer-logs/commands/NN-command-label.log`
 
 ### Log Levels
 
@@ -33,6 +34,14 @@ Each LLM analysis creates a dedicated markdown file with:
 - Input prompt (via `logLLMInput()`)
 - Real-time output chunks (via `logLLMChunk()`)
 - Full response (via `logLLMOutput()`)
+
+### Per-Command Logging
+
+Each command execution creates a dedicated `.log` file in `commands/` with a sequential prefix:
+- `01-explore-symbol.log`, `02-clear-cache.log`, `03-pull-ado-content.log`, etc.
+- All `logger.debug/info/warn/error` calls during the command are written to this file in addition to the daily log
+- Started via `logger.startCommandLog(label)`, ended via `logger.endCommandLog()`
+- Uses try/finally in each command handler to ensure the log is always closed
 
 ## CLI Runner (`runCLI()`)
 

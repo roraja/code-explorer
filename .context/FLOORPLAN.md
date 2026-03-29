@@ -1,6 +1,6 @@
 # Code Explorer Workspace Floorplan
 
-**Code Explorer** is a VS Code extension that provides AI-powered code intelligence in a sidebar panel. Users place their cursor on a symbol, run "Explore Symbol" (Ctrl+Shift+E), and the sidebar shows LLM-generated analysis (overview, step-by-step breakdown, sub-functions, callers, data flow, class members, data kind) with results cached as markdown files.
+**Code Explorer** is a VS Code extension that provides AI-powered code intelligence in a sidebar panel. Users place their cursor on a symbol, run "Explore Symbol" (Ctrl+Shift+E), and the sidebar shows LLM-generated analysis (overview, step-by-step breakdown, sub-functions, callers, data flow, class members, data kind, mermaid diagrams) with results cached as markdown files. Users can ask follow-up questions via the ✨ Enhance button, and symbol names in analysis text are auto-linked for click-to-explore navigation.
 
 Two separate TypeScript bundles: **Extension Host** (Node.js, VS Code API) and **Webview** (browser, DOM). Communication via `postMessage`.
 
@@ -30,12 +30,14 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Webview UI rendering (browser-side)                | `webview/CONTEXT.md`                        | `webview/src/main.ts`, `webview/src/styles/main.css`  |
 | Tests (unit, integration)                          | `test/CONTEXT.md`                           | `test/unit/**/*.test.ts`                              |
 | Global skill installation (Claude + Copilot)       | `src/skills/CONTEXT.md`                     | `src/skills/SkillInstaller.ts`                        |
+| ADO content sync (pull/push)                       | `src/git/CONTEXT.md`                        | `src/git/AdoSync.ts`                                  |
 
 ## Key Features (Current State)
 
 | Feature                        | Status | Module(s)                                         |
 |--------------------------------|--------|---------------------------------------------------|
 | Explore Symbol command         | Implemented | `extension.ts`, `CodeExplorerViewProvider.ts` |
+| Explore All Symbols in File command | Implemented | `extension.ts`, `AnalysisOrchestrator.ts` (`analyzeFile`) |
 | LLM-based symbol resolution (unified prompt) | Implemented | `PromptBuilder.ts`, `ResponseParser.ts`, `AnalysisOrchestrator.ts` |
 | Cursor-based cache lookup (fuzzy match) | Implemented | `CacheStore.ts` (`findByCursor`) |
 | LLM-assisted cache fallback (smart match) | Implemented | `CacheStore.ts` (`findByCursorWithLLMFallback`, `listCachedSymbols`) |
@@ -51,6 +53,13 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Data kind analysis (`json:data_kind`) | Implemented | `ResponseParser.ts`, `CacheStore.ts` |
 | Full-file analysis (`buildFileAnalysis`) | Implemented | `PromptBuilder.ts`, `AnalysisOrchestrator.ts` (`analyzeFile`) |
 | File symbol batch parsing (`json:file_symbol_analyses`) | Implemented | `ResponseParser.ts` (`parseFileSymbolAnalyses`) |
+| Mermaid diagram generation (`json:diagrams`) | Implemented | `PromptBuilder.ts`, `ResponseParser.ts`, `CacheStore.ts`, `webview/main.ts` |
+| Mermaid diagram rendering (SVG in webview) | Implemented | `webview/main.ts` (mermaid library), `webview/styles/main.css` |
+| Interactive Q&A enhancement (✨ Enhance button) | Implemented | `AnalysisOrchestrator.ts` (`enhanceAnalysis`), `PromptBuilder.ts` (`buildEnhance`), `ResponseParser.ts` (`parseEnhanceResponse`), `CodeExplorerViewProvider.ts`, `webview/main.ts` |
+| Q&A history persistence in cache | Implemented | `CacheStore.ts` (`json:qa_history`), `types.ts` (`QAEntry`) |
+| Auto-linking symbols in analysis text | Implemented | `webview/main.ts` (`_buildKnownSymbols`, `_autoLinkSymbols`, `_escAndLink`) |
+| Mermaid + code blocks in Q&A answers | Implemented | `webview/main.ts` (`_renderMarkdownWithMermaid`) |
+| Clickable file:line references | Implemented | `webview/main.ts` (`.file-link` elements) |
 | Static analysis (references, call hierarchy, type hierarchy) | Implemented | `StaticAnalyzer.ts` |
 | Markdown cache (read/write)    | Implemented | `CacheStore.ts`                               |
 | Dual logging (OutputChannel + file) | Implemented | `logger.ts`                              |
@@ -60,6 +69,8 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Navigate-to-source from webview | Implemented | `CodeExplorerViewProvider.ts`                |
 | Scope-chain-based tab deduplication | Implemented | `CodeExplorerViewProvider.ts`            |
 | Workspace-context CLI execution (cwd) | Implemented | `cli.ts`, `CopilotCLIProvider.ts`, `MaiClaudeProvider.ts` |
+| Install Global Skills command  | Implemented | `extension.ts`, `SkillInstaller.ts`            |
+| ADO content sync (pull/push)   | Implemented | `extension.ts`, `AdoSync.ts`                   |
 | Legacy SymbolResolver (VS Code API) | Preserved (not primary) | `SymbolResolver.ts` (not imported by `extension.ts`) |
 | **CacheManager/IndexManager**  | Not implemented | Planned in `src/cache/`                   |
 | **AnalysisQueue with priority** | Not implemented | Planned in `src/analysis/`               |
@@ -69,7 +80,6 @@ Only load additional contexts if the task clearly spans multiple modules.
 | **MCP server**                 | Not implemented | Planned in `src/mcp/`                     |
 | **File watcher invalidation**  | Not implemented | Planned                                   |
 | **Analyze Workspace command**  | Stub only | `extension.ts` (shows "future release" message)  |
-| **Install Global Skills command** | Implemented | `extension.ts`, `SkillInstaller.ts`            |
 
 ## Data Flow
 
@@ -85,14 +95,31 @@ User clicks symbol -> Ctrl+Shift+E
           -> CacheStore.findByCursorWithLLMFallback(cursor, workspaceRoot)
             -> Tier 1: findByCursor() (name + ±3 lines) [FAST]
             -> Tier 2: listCachedSymbols() + lightweight Copilot CLI match [~5-15s]
-          -> PromptBuilder.buildUnified() (single prompt: identify + analyze)
+          -> PromptBuilder.buildUnified() (single prompt: identify + analyze + diagrams)
           -> LLMProvider.analyze() (spawns CLI via runCLI, stdin pipe, workspace cwd)
           -> ResponseParser.parseSymbolIdentity() (extracts kind from response)
-          -> ResponseParser.parse() (extracts analysis from same response)
+          -> ResponseParser.parse() (extracts analysis + diagrams from same response)
           -> ResponseParser.parseRelatedSymbolCacheEntries() (related symbols)
           -> CacheStore.write() (persists result as markdown)
           -> Pre-cache related symbols (if any discovered)
         -> posts 'setState' to webview (renders analysis tabs + sections)
+        -> webview renders mermaid diagrams asynchronously
+        -> webview auto-links symbol names in analysis text
+```
+
+Enhance flow (Q&A on existing analysis):
+
+```
+User clicks ✨ Enhance button -> enters question in modal dialog
+  -> webview posts 'enhanceAnalysis' message (tabId, userPrompt)
+    -> CodeExplorerViewProvider._handleEnhanceAnalysis()
+      -> AnalysisOrchestrator.enhanceAnalysis(existingResult, userPrompt)
+        -> PromptBuilder.buildEnhance() (includes existing analysis + source + Q&A history)
+        -> LLMProvider.analyze()
+        -> ResponseParser.parseEnhanceResponse() (answer, updated overview, additional points/issues)
+        -> Merges Q&A entry + enhancements into result
+        -> CacheStore.write() (persists updated result with Q&A history)
+      -> pushState with updated analysis
 ```
 
 Legacy flow (programmatic calls with pre-resolved SymbolInfo):
@@ -138,10 +165,12 @@ Single test: `TS_NODE_PROJECT=tsconfig.test.json npx mocha test/unit/models/erro
 
 | Symptom | First thing to check |
 |---------|---------------------|
-| LLM analysis returns empty | Check VS Code Output panel "Code Explorer" and LLM call logs at `.vscode/code-explorer/logs/llms/` |
+| LLM analysis returns empty | Check VS Code Output panel "Code Explorer" and LLM call logs at `.vscode/code-explorer-logs/llms/` |
 | `claude` CLI refuses to start | Ensure `CLAUDECODE` env var is deleted before spawn (MaiClaudeProvider handles this) |
 | Cache not found despite prior analysis | Check `findByCursor` logs — line tolerance is ±3; different scope = different cache file |
 | Webview shows blank | Check CSP in `_getHtmlForWebview()`, verify `webview/dist/` has built files |
 | "No symbol found at cursor" | Cursor not on a word; check `getWordRangeAtPosition` call in `extension.ts` |
 | Tab duplicates for same symbol | Scope chain mismatch; check `openTab()` dedup logic |
 | Symbol resolved as 'unknown' | LLM did not return `json:symbol_identity` block; check prompt and response in LLM call log |
+| Mermaid diagram not rendering | Check CSP allows `'unsafe-inline'` for styles (mermaid injects inline CSS); check browser console for mermaid errors |
+| Enhance Q&A not persisting | Check `CacheStore.write()` — Q&A history is serialized as `json:qa_history` block |

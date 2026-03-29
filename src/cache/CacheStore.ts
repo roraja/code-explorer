@@ -406,6 +406,38 @@ export class CacheStore {
       lines.push('');
     }
 
+    // Data Kind
+    if (result.dataKind && result.dataKind.label) {
+      lines.push('## Data Kind');
+      lines.push('');
+      lines.push(`**${result.dataKind.label}**`);
+      lines.push('');
+      if (result.dataKind.description) {
+        lines.push(result.dataKind.description);
+        lines.push('');
+      }
+      if (result.dataKind.examples.length > 0) {
+        lines.push('**Examples:**');
+        lines.push('');
+        for (const example of result.dataKind.examples) {
+          lines.push(`- \`${example}\``);
+        }
+        lines.push('');
+      }
+      if (result.dataKind.references.length > 0) {
+        lines.push('**References:**');
+        lines.push('');
+        for (const ref of result.dataKind.references) {
+          lines.push(`- ${ref}`);
+        }
+        lines.push('');
+      }
+      lines.push('```json:data_kind');
+      lines.push(JSON.stringify(result.dataKind, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
     // Class Members
     if (result.classMembers && result.classMembers.length > 0) {
       lines.push('## Class Members');
@@ -516,6 +548,14 @@ export class CacheStore {
         scopeAndLifetime: string;
       }>(body, 'variable_lifecycle');
 
+      // Parse data kind from json:data_kind block
+      const dataKind = this._parseJsonObjectBlock<{
+        label: string;
+        description: string;
+        examples: string[];
+        references: string[];
+      }>(body, 'data_kind');
+
       // Parse class members from json:class_members block
       const classMembers = this._parseJsonBlock<{
         name: string; memberKind: string; typeName: string;
@@ -549,6 +589,12 @@ export class CacheStore {
           mutations: variableLifecycle.mutations || [],
           consumption: variableLifecycle.consumption || [],
           scopeAndLifetime: variableLifecycle.scopeAndLifetime || '',
+        } : undefined,
+        dataKind: dataKind && dataKind.label ? {
+          label: dataKind.label,
+          description: dataKind.description || '',
+          examples: Array.isArray(dataKind.examples) ? dataKind.examples : [],
+          references: Array.isArray(dataKind.references) ? dataKind.references : [],
         } : undefined,
         classMembers: classMembers.length > 0 ? classMembers.map((m) => ({
           name: m.name,

@@ -648,6 +648,165 @@ export class AnalysisOrchestrator {
     }
   }
 
+  /**
+   * Analyze all crucial symbols in a file in a single LLM call.
+   *
+   * Sends the full file source to the LLM with instructions to identify
+   * and analyze every important symbol (classes, functions, methods,
+   * interfaces, enums, type aliases, exported variables). Each symbol's
+   * analysis is written as an individual cache file so that future
+   * "Explore Symbol" lookups can hit the cache.
+   *
+   * @param filePath    Relative path from workspace root
+   * @param fileSource  Full source code of the file
+   * @param onProgress  Optional callback for progress updates
+   * @returns Number of symbols cached
+   */
+  async analyzeFile(
+    filePath: string,
+    fileSource: string,
+    onProgress?: (stage: string, detail?: string) => void
+  ): Promise<number> {
+    const startTime = Date.now();
+    logger.info(`Orchestrator.analyzeFile: ${filePath} (${fileSource.length} chars)`);
+
+    // Start LLM call log
+    logger.startLLMCallLog(`file:${filePath}`, this._llmProvider.name);
+    logger.logLLMStep(`Starting file-level analysis for ${filePath}`);
+
+    // 1. Check LLM availability
+    onProgress?.('checking-llm', `Checking ${this._llmProvider.name} availability...`);
+    logger.logLLMStep(`Checking if LLM provider "${this._llmProvider.name}" is available...`);
+    const available = await this._llmProvider.isAvailable();
+    if (!available) {
+      logger.logLLMStep(`LLM provider "${this._llmProvider.name}" not available — cannot analyze file`);
+      logger.warn(`Orchestrator.analyzeFile: LLM provider "${this._llmProvider.name}" not available`);
+      return 0;
+    }
+
+    // 2. Build file analysis prompt
+    onProgress?.('building-prompt', 'Building analysis prompt...');
+    logger.logLLMStep('Building file analysis prompt...');
+    const prompt = PromptBuilder.buildFileAnalysis(filePath, fileSource, this._cache.cacheRoot);
+    logger.logLLMStep(`File analysis prompt built (${prompt.length} chars)`);
+    logger.logLLMInput(prompt);
+
+    // 3. Send to LLM
+    onProgress?.('llm-analyzing', `Analyzing all symbols with ${this._llmProvider.name}...`);
+    let rawResponse = '';
+    try {
+      logger.logLLMStep(`Sending file analysis prompt to ${this._llmProvider.name}...`);
+      logger.logLLMChunk('\n---\n\n## Real-time Output\n\n```\n');
+
+      rawResponse = await this._llmProvider.analyze({
+        prompt,
+        systemPrompt: PromptBuilder.SYSTEM_PROMPT,
+        maxTokens: 16384, // larger token budget for full-file analysis
+      });
+
+      logger.logLLMChunk('\n```\n\n');
+      logger.logLLMStep(`Response received (${rawResponse.length} chars)`);
+      logger.logLLMOutput(rawResponse);
+    } catch (err) {
+      logger.logLLMStep(`File analysis LLM call FAILED: ${err}`);
+      logger.error(`Orchestrator.analyzeFile: LLM call failed: ${err}`);
+      return 0;
+    }
+
+    // 4. Parse the response
+    onProgress?.('parsing', 'Parsing symbol analyses...');
+    logger.logLLMStep('Parsing file symbol analyses from response...');
+    const symbolEntries = ResponseParser.parseFileSymbolAnalyses(rawResponse);
+    logger.logLLMStep(`Parsed ${symbolEntries.length} symbol analyses from response`);
+
+    if (symbolEntries.length === 0) {
+      logger.warn(`Orchestrator.analyzeFile: no symbols parsed from LLM response for ${filePath}`);
+      return 0;
+    }
+
+    // 5. Write each symbol to cache
+    onProgress?.('writing-cache', `Writing ${symbolEntries.length} symbol caches...`);
+    logger.logLLMStep(`Writing ${symbolEntries.length} symbol cache entries...`);
+
+    let cachedCount = 0;
+    for (const entry of symbolEntries) {
+      const symbolInfo: SymbolInfo = {
+        name: entry.name,
+        kind: entry.kind,
+        filePath: entry.filePath,
+        position: { line: entry.line, character: 0 },
+        containerName: entry.container || undefined,
+        scopeChain: entry.scopeChain,
+      };
+
+      // Skip if already cached with non-stale LLM data
+      try {
+        const existing = await this._cache.read(symbolInfo);
+        if (existing && !existing.metadata.stale && existing.metadata.llmProvider) {
+          logger.debug(
+            `Orchestrator.analyzeFile: skipping "${entry.name}" — already cached`
+          );
+          continue;
+        }
+      } catch {
+        // Cache read error — proceed to write
+      }
+
+      const result: AnalysisResult = {
+        symbol: symbolInfo,
+        overview: entry.overview,
+        callStacks: entry.callers,
+        usages: entry.callers.map((cs) => ({
+          filePath: cs.caller.filePath,
+          line: cs.caller.line,
+          character: 0,
+          contextLine: cs.chain || '',
+          isDefinition: false,
+        })),
+        dataFlow: [],
+        relationships: [],
+        keyMethods: entry.keyPoints,
+        dependencies: entry.dependencies,
+        usagePattern: entry.usagePattern,
+        potentialIssues: entry.potentialIssues,
+        functionSteps: entry.steps.length > 0 ? entry.steps : undefined,
+        subFunctions: entry.subFunctions.length > 0 ? entry.subFunctions : undefined,
+        functionInputs: entry.functionInputs.length > 0 ? entry.functionInputs : undefined,
+        functionOutput: entry.functionOutput || undefined,
+        classMembers: entry.classMembers.length > 0 ? entry.classMembers : undefined,
+        metadata: {
+          analyzedAt: new Date().toISOString(),
+          sourceHash: '',
+          dependentFileHashes: {},
+          llmProvider: this._llmProvider.name,
+          analysisVersion: ANALYSIS_VERSION,
+          stale: false,
+        },
+      };
+
+      try {
+        await this._cache.write(result);
+        cachedCount++;
+        logger.debug(
+          `Orchestrator.analyzeFile: cached ${entry.kind} "${entry.name}" at line ${entry.line}`
+        );
+      } catch (err) {
+        logger.warn(`Orchestrator.analyzeFile: failed to cache "${entry.name}": ${err}`);
+      }
+    }
+
+    const elapsed = Date.now() - startTime;
+    logger.logLLMStep(
+      `File analysis complete: ${cachedCount}/${symbolEntries.length} symbols cached in ${elapsed}ms`
+    );
+    logger.info(
+      `Orchestrator.analyzeFile: completed ${filePath} — ` +
+        `${cachedCount}/${symbolEntries.length} symbols cached in ${elapsed}ms`
+    );
+
+    return cachedCount;
+  }
+
   dispose(): void {
     this._onAnalysisComplete.dispose();
   }

@@ -7,7 +7,7 @@ Shared utilities used across the extension host.
 | File | Role |
 |------|------|
 | `logger.ts` | Dual-output logger: VS Code OutputChannel + daily log files. Also manages per-LLM-call markdown log files. |
-| `cli.ts` | `runCLI()` utility for spawning CLI processes with stdin piping, manual timeout, and env overrides. |
+| `cli.ts` | `runCLI()` utility for spawning CLI processes with stdin piping, manual timeout, configurable cwd, and env overrides. |
 
 ## Logger
 
@@ -45,6 +45,7 @@ interface CLIRunOptions {
   stdinData: string;        // Prompt piped via stdin
   timeoutMs?: number;       // Default: 900000 (15 min)
   envOverrides?: Record<string, string | undefined>;  // undefined = delete key
+  cwd?: string;             // Working directory (defaults to process.cwd())
   label: string;            // For log messages
   onStdoutChunk?: (chunk: string) => void;
   onStderrChunk?: (chunk: string) => void;
@@ -54,6 +55,7 @@ interface CLIRunOptions {
 ### Key Implementation Details
 
 - Uses `spawn()` (not `exec()`/`execFile()`) for streaming output
+- `cwd` option allows running CLI tools in the workspace directory for full workspace context
 - Manual timeout via `setTimeout` + `child.kill('SIGTERM')` (spawn doesn't support timeout)
 - `settled` boolean guard prevents double-resolve/reject
 - Periodic "still waiting" log every 15 seconds

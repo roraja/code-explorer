@@ -691,3 +691,72 @@ details[open] > .section__title::before {
   text-decoration: underline;
   color: var(--vscode-textLink-activeForeground, #3794ff);
 }
+
+/* =====================
+   Data Kind (Variable Analysis)
+   ===================== */
+
+.data-kind-item {
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--vscode-editor-background, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.06));
+}
+
+.data-kind-item__label {
+  margin-bottom: 6px;
+}
+
+.badge--data-kind {
+  display: inline-block;
+  background: var(--vscode-editorInfo-background, rgba(0, 120, 212, 0.1));
+  color: var(--vscode-editorInfo-foreground, #3794ff);
+  border: 1px solid var(--vscode-editorInfo-foreground, rgba(0, 120, 212, 0.3));
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.data-kind-item__desc {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.data-kind-item__section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-top: 6px;
+  margin-bottom: 3px;
+}
+
+.data-kind-item__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.data-kind-item__list li {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 2px 0;
+  color: var(--vscode-foreground);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.data-kind-item__list li:last-child {
+  border-bottom: none;
+}
+
+.data-kind-item__list code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, rgba(255, 255, 255, 0.05));
+  font-family: var(--vscode-editor-font-family);
+  font-size: 11px;
+}

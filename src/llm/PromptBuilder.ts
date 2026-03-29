@@ -379,6 +379,150 @@ If no related symbols are found, output an empty array: \`\`\`json:related_symbo
   }
 
   /**
+   * Build a prompt that instructs the LLM to analyze ALL crucial symbols
+   * in a given file and output cache-compatible entries for each.
+   *
+   * The LLM reads the full file source, identifies every important symbol
+   * (classes, functions, methods, interfaces, enums, type aliases, exported
+   * variables, exported constants), and produces a structured JSON block
+   * containing a full analysis entry for each — ready to be written as
+   * individual cache files.
+   *
+   * @param filePath      Relative path from workspace root
+   * @param fileSource    Full source code of the file
+   * @param cacheRoot     Absolute path to the cache root directory
+   */
+  static buildFileAnalysis(filePath: string, fileSource: string, cacheRoot?: string): string {
+    const lang = this._guessLanguage(filePath);
+
+    logger.debug(
+      `PromptBuilder.buildFileAnalysis: file="${filePath}" — ` +
+        `source: ${fileSource.length} chars, lang: ${lang || 'unknown'}`
+    );
+
+    return `You are analyzing an entire source file to identify and document all important symbols. Your goal is to produce cache entries for every crucial symbol so that future lookups can hit the cache.
+
+## File
+**Path:** \`${filePath}\`
+**Language:** ${lang || 'unknown'}
+
+## Full Source Code
+\`\`\`${lang}
+${fileSource}
+\`\`\`
+
+## Task
+
+Analyze the file above and identify **every crucial symbol** defined in it. Crucial symbols include:
+- **Classes** (including abstract classes)
+- **Functions** (exported or module-level)
+- **Methods** (members of classes/structs)
+- **Interfaces**
+- **Type aliases** (\`type\` definitions)
+- **Enums**
+- **Exported variables and constants** (module-level \`export const\`, \`export let\`, etc.)
+- **Structs** (C/C++/Rust/Go)
+
+Skip trivial or internal-only symbols (e.g., unexported local variables, loop counters, import statements, single-use inline helpers that are obvious from context).
+
+For **each** identified symbol, produce a full analysis entry.
+
+### Cache File Naming Convention
+
+Each symbol's analysis is cached as a markdown file. The cache key pattern is:
+- File path: \`<cache_root>/<source_file_path>/<cache_key>.md\`
+- Cache key format: \`<scope_chain_dot_separated>.<kind_prefix>.<sanitized_name>\`
+- If no scope chain: \`<kind_prefix>.<sanitized_name>\`
+- If containerName but no scope chain: \`<containerName>.<kind_prefix>.<sanitized_name>\`
+
+Kind prefixes: class->"class", function->"fn", method->"method", variable->"var", interface->"interface", type->"type", enum->"enum", property->"prop", parameter->"param", struct->"struct", unknown->"sym"
+
+${cacheRoot ? 'Cache root: `' + cacheRoot + '`' : 'Cache root: `.vscode/code-explorer`'}
+
+### Output Format
+
+Output a single machine-readable JSON block listing ALL symbol analyses for this file:
+
+\`\`\`json:file_symbol_analyses
+[
+  {
+    "cache_file_path": "${filePath}/<cache_key>.md",
+    "name": "SymbolName",
+    "kind": "function",
+    "filePath": "${filePath}",
+    "line": 10,
+    "container": null,
+    "scope_chain": [],
+    "overview": "2-3 sentence description of what this symbol does, its purpose, and role in the codebase.",
+    "key_points": ["Important characteristic 1", "Important characteristic 2"],
+    "steps": [
+      { "step": 1, "description": "First thing this function/method does" }
+    ],
+    "sub_functions": [
+      {
+        "name": "calledFunction",
+        "description": "What it does",
+        "input": "(param: type) — description",
+        "output": "returnType — description",
+        "filePath": "src/path/to/file.ts",
+        "line": 15,
+        "kind": "function"
+      }
+    ],
+    "function_inputs": [
+      {
+        "name": "paramName",
+        "typeName": "ParamType",
+        "description": "What it represents",
+        "mutated": false
+      }
+    ],
+    "function_output": {
+      "typeName": "ReturnType",
+      "description": "What is returned"
+    },
+    "class_members": [
+      {
+        "name": "memberName",
+        "memberKind": "field",
+        "typeName": "MemberType",
+        "visibility": "private",
+        "isStatic": false,
+        "description": "Brief description",
+        "line": 15
+      }
+    ],
+    "callers": [
+      {
+        "name": "callerName",
+        "filePath": "src/path/to/file.ts",
+        "line": 42,
+        "kind": "function",
+        "context": "How it uses this symbol"
+      }
+    ],
+    "dependencies": ["dep1", "dep2"],
+    "usage_pattern": "How this symbol is typically used",
+    "potential_issues": ["Issue 1"]
+  }
+]
+\`\`\`
+
+### Rules
+
+1. **Be thorough**: Include every class, function, method, interface, enum, type alias, and exported variable/constant.
+2. **Methods inside classes**: For methods, set \`container\` to the class name and \`scope_chain\` to \`["ClassName"]\`. The cache key should be \`ClassName.method.methodName\`.
+3. **Nested symbols**: For symbols inside other symbols, build the full scope chain.
+4. **Steps and sub-functions**: Only include for functions/methods. Use empty arrays for classes, interfaces, enums, variables.
+5. **Class members**: Only include for classes/structs/interfaces. Use empty array for functions/variables.
+6. **Function inputs/output**: Only include for functions/methods. Use empty array / null for others.
+7. **Callers**: List functions/methods in THIS file that call each symbol. For cross-file callers, include what you can determine from the visible code.
+8. **Cache file path**: Must follow the naming convention exactly so the extension can look up these entries later.
+9. **Line numbers**: Use 0-based line numbers matching the source code.
+10. **Be accurate**: Only state facts you can determine from the source code. Don't hallucinate callers or dependencies.`;
+  }
+
+  /**
    * Get the strategy used for a given symbol kind (for testing).
    */
   static getStrategy(kind: string): PromptStrategy {

@@ -16,6 +16,7 @@ export const VIEW_ID = 'codeExplorer.sidebar';
 /** Command identifiers. */
 export const COMMANDS = {
   EXPLORE_SYMBOL: 'codeExplorer.exploreSymbol',
+  EXPLORE_FILE_SYMBOLS: 'codeExplorer.exploreFileSymbols',
   REFRESH_ANALYSIS: 'codeExplorer.refreshAnalysis',
   CLEAR_CACHE: 'codeExplorer.clearCache',
   ANALYZE_WORKSPACE: 'codeExplorer.analyzeWorkspace',

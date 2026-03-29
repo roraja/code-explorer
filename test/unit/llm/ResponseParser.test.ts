@@ -380,6 +380,118 @@ A variable.
     });
   });
 
+  suite('parse — data kind', () => {
+    test('extracts data kind from json:data_kind block with all fields', () => {
+      const raw = `### Overview
+A variable.
+
+### Data Kind
+
+\`\`\`json:data_kind
+{
+  "label": "Cache / Lookup Table",
+  "description": "Holds a Map keyed by cache key to AnalysisResult objects for O(1) lookups.",
+  "examples": [
+    "new Map<string, AnalysisResult>()",
+    "Map { 'src/main.ts::fn.process' => { overview: '...' } }"
+  ],
+  "references": [
+    "AnalysisResult (src/models/types.ts:121)",
+    "Cache strategy: docs/06-data_model_and_cache.md"
+  ]
+}
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+
+      assert.ok(result.dataKind);
+      assert.strictEqual(result.dataKind!.label, 'Cache / Lookup Table');
+      assert.strictEqual(result.dataKind!.description, 'Holds a Map keyed by cache key to AnalysisResult objects for O(1) lookups.');
+      assert.strictEqual(result.dataKind!.examples.length, 2);
+      assert.strictEqual(result.dataKind!.examples[0], 'new Map<string, AnalysisResult>()');
+      assert.strictEqual(result.dataKind!.references.length, 2);
+      assert.strictEqual(result.dataKind!.references[0], 'AnalysisResult (src/models/types.ts:121)');
+    });
+
+    test('extracts data kind with minimal fields (label only)', () => {
+      const raw = `\`\`\`json:data_kind
+{
+  "label": "State / Status Flag",
+  "description": "",
+  "examples": [],
+  "references": []
+}
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+
+      assert.ok(result.dataKind);
+      assert.strictEqual(result.dataKind!.label, 'State / Status Flag');
+      assert.strictEqual(result.dataKind!.description, '');
+      assert.strictEqual(result.dataKind!.examples.length, 0);
+      assert.strictEqual(result.dataKind!.references.length, 0);
+    });
+
+    test('returns undefined when no json:data_kind block exists', () => {
+      const raw = `### Overview\nA variable.\n`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.strictEqual(result.dataKind, undefined);
+    });
+
+    test('returns undefined when label is missing', () => {
+      const raw = `\`\`\`json:data_kind
+{
+  "description": "Some description",
+  "examples": ["example1"],
+  "references": ["ref1"]
+}
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.strictEqual(result.dataKind, undefined);
+    });
+
+    test('returns undefined when label is empty string', () => {
+      const raw = `\`\`\`json:data_kind
+{
+  "label": "",
+  "description": "Some description"
+}
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.strictEqual(result.dataKind, undefined);
+    });
+
+    test('returns undefined for malformed JSON', () => {
+      const raw = `\`\`\`json:data_kind\n{ broken json !!!\n\`\`\`\n`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.strictEqual(result.dataKind, undefined);
+    });
+
+    test('returns undefined when json:data_kind is not an object', () => {
+      const raw = `\`\`\`json:data_kind\n"just a string"\n\`\`\`\n`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.strictEqual(result.dataKind, undefined);
+    });
+
+    test('handles missing optional fields gracefully', () => {
+      const raw = `\`\`\`json:data_kind
+{
+  "label": "Domain Entity"
+}
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+
+      assert.ok(result.dataKind);
+      assert.strictEqual(result.dataKind!.label, 'Domain Entity');
+      assert.strictEqual(result.dataKind!.description, '');
+      assert.deepStrictEqual(result.dataKind!.examples, []);
+      assert.deepStrictEqual(result.dataKind!.references, []);
+    });
+  });
+
   suite('parse — class members', () => {
     test('extracts class members from json:class_members block', () => {
       const raw = `### Overview

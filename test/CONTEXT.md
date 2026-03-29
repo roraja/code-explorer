@@ -23,12 +23,14 @@ test/
   __mocks__/vscode.js         # Mock VS Code API for unit tests
   setup.js                     # Mocha setup (registers mocks)
   unit/
+    cache/
+      CacheStore.test.ts       # Tests findByCursor fuzzy lookup (uses real filesystem via tmpdir)
     llm/
-      PromptBuilder.test.ts    # Tests prompt strategy selection and output
-      ResponseParser.test.ts   # Tests JSON block extraction and section parsing
+      PromptBuilder.test.ts    # Tests prompt strategy selection, buildUnified, struct support
+      ResponseParser.test.ts   # Tests JSON block extraction, parseSymbolIdentity, parseRelatedSymbolCacheEntries, data kind parsing
     models/
       errors.test.ts           # Tests error hierarchy, instanceof checks, getUserMessage()
-      types.test.ts            # Tests type definitions and SYMBOL_KIND_PREFIX map
+      types.test.ts            # Tests type definitions, SYMBOL_KIND_PREFIX (including struct), CursorContext
   integration/
     extension.test.ts          # Integration tests requiring VS Code runtime
   suite/
@@ -41,6 +43,7 @@ test/
 Test files mirror source paths:
 - `src/models/errors.ts` -> `test/unit/models/errors.test.ts`
 - `src/llm/PromptBuilder.ts` -> `test/unit/llm/PromptBuilder.test.ts`
+- `src/cache/CacheStore.ts` -> `test/unit/cache/CacheStore.test.ts`
 
 ## VS Code Mock
 
@@ -63,3 +66,4 @@ Test files mirror source paths:
    ```
 3. Import from `src/` directly (test tsconfig includes both)
 4. Use `CodeExplorerError` subclasses for error assertion tests
+5. For filesystem-dependent tests (e.g., CacheStore), use `os.tmpdir()` with `setup`/`teardown` cleanup

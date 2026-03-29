@@ -161,6 +161,67 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showInformationMessage(
         'Workspace analysis will be available in a future release.'
       );
+    }),
+
+    vscode.commands.registerCommand(COMMANDS.EXPLORE_FILE_SYMBOLS, async () => {
+      logger.info('Command: exploreFileSymbols invoked');
+
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        logger.warn('exploreFileSymbols: no active editor');
+        vscode.window.showWarningMessage(
+          'No active editor. Open a file to explore its symbols.'
+        );
+        return;
+      }
+
+      const filePath = path.relative(workspaceRoot, editor.document.fileName);
+      const fileSource = editor.document.getText();
+
+      if (!fileSource.trim()) {
+        logger.warn('exploreFileSymbols: file is empty');
+        vscode.window.showWarningMessage('The current file is empty.');
+        return;
+      }
+
+      logger.info(`exploreFileSymbols: analyzing ${filePath} (${fileSource.length} chars)`);
+
+      // Show progress notification while running
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Code Explorer: Analyzing all symbols in ${path.basename(filePath)}`,
+          cancellable: false,
+        },
+        async (progress) => {
+          try {
+            const cachedCount = await orchestrator.analyzeFile(
+              filePath,
+              fileSource,
+              (stage, detail) => {
+                progress.report({ message: detail || stage });
+              }
+            );
+
+            if (cachedCount > 0) {
+              vscode.window.showInformationMessage(
+                `Code Explorer: Cached ${cachedCount} symbol${cachedCount > 1 ? 's' : ''} from ${path.basename(filePath)}. ` +
+                  `Use "Explore Symbol" (Ctrl+Shift+E) on any symbol for instant results.`
+              );
+            } else {
+              vscode.window.showWarningMessage(
+                `Code Explorer: No symbols were cached for ${path.basename(filePath)}. ` +
+                  `The LLM may not have been available or the file has no analyzable symbols.`
+              );
+            }
+          } catch (err) {
+            logger.error(`exploreFileSymbols: failed: ${err}`);
+            vscode.window.showErrorMessage(
+              `Code Explorer: Failed to analyze file. Check the Output panel for details.`
+            );
+          }
+        }
+      );
     })
   );
 

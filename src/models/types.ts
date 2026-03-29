@@ -141,6 +141,8 @@ export interface AnalysisResult {
   potentialIssues?: string[];
   /** Variable lifecycle (for variables) */
   variableLifecycle?: VariableLifecycle;
+  /** Kind of data this variable holds, with examples and references (for variables) */
+  dataKind?: DataKindInfo;
   /** Numbered steps describing what this function does */
   functionSteps?: FunctionStep[];
   /** Sub-functions called by this symbol, with details */
@@ -303,6 +305,29 @@ export interface FunctionOutputInfo {
   typeKind?: string;
   /** Brief overview of the return type structure */
   typeOverview?: string;
+}
+
+/**
+ * Describes the kind of data a variable holds, with examples and references.
+ * For instance, whether a variable holds a configuration object, a cache map,
+ * a database connection, an event handler, etc.
+ */
+export interface DataKindInfo {
+  /** Human-readable label for the data kind (e.g., "Configuration Object", "Cache Map", "Event Handler") */
+  label: string;
+  /** Detailed description of what kind of data this variable holds and why */
+  description: string;
+  /**
+   * Concrete examples of the data this variable might hold at runtime.
+   * Each example shows a realistic value or shape.
+   * Example: ["{ host: 'localhost', port: 3000 }", "{ host: 'prod.api.com', port: 443 }"]
+   */
+  examples: string[];
+  /**
+   * References to related types, docs, or patterns that define this data kind.
+   * Example: ["AnalysisResult (src/models/types.ts:121)", "See docs/06-data_model_and_cache.md"]
+   */
+  references: string[];
 }
 
 /**

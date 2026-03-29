@@ -27,6 +27,7 @@
   "activationEvents": [
     "onView:codeExplorer.sidebar",
     "onCommand:codeExplorer.exploreSymbol",
+    "onCommand:codeExplorer.exploreFileSymbols",
     "onLanguage:typescript",
     "onLanguage:javascript",
     "onLanguage:typescriptreact",
@@ -64,6 +65,11 @@
         "category": "Code Explorer"
       },
       {
+        "command": "codeExplorer.exploreFileSymbols",
+        "title": "Explore All Symbols in File",
+        "category": "Code Explorer"
+      },
+      {
         "command": "codeExplorer.refreshAnalysis",
         "title": "Refresh Analysis",
         "category": "Code Explorer",
@@ -86,6 +92,11 @@
           "command": "codeExplorer.exploreSymbol",
           "when": "editorTextFocus && resourceLangId =~ /typescript|javascript|typescriptreact|javascriptreact|cpp|c|python|java|csharp/",
           "group": "navigation@10"
+        },
+        {
+          "command": "codeExplorer.exploreFileSymbols",
+          "when": "editorTextFocus && resourceLangId =~ /typescript|javascript|typescriptreact|javascriptreact|cpp|c|python|java|csharp/",
+          "group": "navigation@11"
         }
       ],
       "view/title": [
@@ -99,8 +110,14 @@
     "keybindings": [
       {
         "command": "codeExplorer.exploreSymbol",
-        "key": "ctrl+shift+e",
-        "mac": "cmd+shift+e",
+        "key": "ctrl+shift+h",
+        "mac": "ctrl+shift+h",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codeExplorer.exploreFileSymbols",
+        "key": "ctrl+shift+alt+e",
+        "mac": "cmd+shift+alt+e",
         "when": "editorTextFocus"
       }
     ],

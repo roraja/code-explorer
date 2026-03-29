@@ -39,6 +39,42 @@ A 2-3 sentence description of what this variable represents, its purpose, and it
 - Whether it is exported or module-scoped
 - Key constraints or invariants
 
+### Data Kind
+Identify the **kind of data** this variable holds. Classify it into one of the common data kinds below (or create your own label if none fits):
+- **Configuration Object** — Settings, options, feature flags
+- **Cache / Lookup Table** — Map, dictionary, or set used for fast retrieval
+- **State / Status Flag** — Boolean or enum tracking component state
+- **Accumulator / Counter** — Numeric value built up over iterations
+- **Collection / List** — Array or iterable of domain entities
+- **Database / IO Handle** — Connection, stream, file handle
+- **Event Handler / Callback** — Function reference for event-driven patterns
+- **Intermediate Computation** — Temporary result used in a larger calculation
+- **Domain Entity** — Instance of a business/domain model
+- **Dependency / Service** — Injected or imported service reference
+- **Raw / Primitive** — Simple string, number, or boolean literal
+
+Provide:
+1. A **label** (the data kind name)
+2. A **description** explaining what data this variable holds and why it exists
+3. One or more **examples** showing realistic runtime values or shapes this variable might hold (use code literals)
+4. **References** to related type definitions, documentation, or design patterns that define or constrain this data kind
+
+Output a machine-readable JSON block:
+\`\`\`json:data_kind
+{
+  "label": "Cache / Lookup Table",
+  "description": "Holds a Map keyed by symbol cache key to previously computed AnalysisResult objects, enabling O(1) lookups and avoiding redundant LLM calls.",
+  "examples": [
+    "new Map<string, AnalysisResult>()",
+    "Map { 'src/main.ts::fn.process' => { overview: '...', callStacks: [...] } }"
+  ],
+  "references": [
+    "AnalysisResult (src/models/types.ts:121)",
+    "Cache invalidation strategy: docs/06-data_model_and_cache.md"
+  ]
+}
+\`\`\`
+
 ### Variable Lifecycle
 Describe the full lifecycle of this variable:
 1. **Declaration**: How and where it is declared (const/let/var, scope level)

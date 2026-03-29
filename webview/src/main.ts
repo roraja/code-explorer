@@ -97,7 +97,7 @@ function renderEmpty(): string {
     <p class="empty-state__description">
       Click on a symbol in your code, then run<br>
       <strong>Code Explorer: Explore Symbol</strong><br>
-      or press <kbd>Ctrl+Shift+E</kbd>
+      or press <kbd>Ctrl+Shift+H</kbd>
     </p>
   </div>`;
 }
@@ -179,6 +179,35 @@ function renderAnalysis(tab: Tab): string {
   // Overview
   if (a.overview) {
     sections.push(renderSection('Overview', `<p class="overview-text">${esc(a.overview)}</p>`));
+  }
+
+  // Data Kind (for variables — what kind of data this variable holds)
+  if (a.dataKind && a.dataKind.label) {
+    const dk = a.dataKind;
+    const parts: string[] = [];
+    parts.push(`<div class="data-kind-item">`);
+    parts.push(`<div class="data-kind-item__label"><span class="badge badge--data-kind">📦 ${esc(dk.label)}</span></div>`);
+    if (dk.description) {
+      parts.push(`<div class="data-kind-item__desc">${esc(dk.description)}</div>`);
+    }
+    if (dk.examples && dk.examples.length > 0) {
+      parts.push(`<div class="data-kind-item__section-label">Examples:</div>`);
+      parts.push(`<ul class="data-kind-item__list">`);
+      for (const ex of dk.examples) {
+        parts.push(`<li><code>${esc(ex)}</code></li>`);
+      }
+      parts.push(`</ul>`);
+    }
+    if (dk.references && dk.references.length > 0) {
+      parts.push(`<div class="data-kind-item__section-label">References:</div>`);
+      parts.push(`<ul class="data-kind-item__list">`);
+      for (const ref of dk.references) {
+        parts.push(`<li>${esc(ref)}</li>`);
+      }
+      parts.push(`</ul>`);
+    }
+    parts.push(`</div>`);
+    sections.push(renderSection('Data Kind', parts.join('')));
   }
 
   // Step-by-Step Breakdown (numbered functionalities)

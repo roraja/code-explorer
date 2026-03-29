@@ -1,14 +1,16 @@
 # src/providers/
 
-Symbol resolution — translating a cursor position into a `SymbolInfo` object.
+Legacy symbol resolution — translating a cursor position into a `SymbolInfo` object via VS Code's document symbol provider.
+
+**⚠️ Not the primary flow**: As of the unified prompt architecture, `SymbolResolver` is **no longer imported by `extension.ts`**. Symbol resolution is now handled by the LLM via `PromptBuilder.buildUnified()`. This file is preserved for potential future use or programmatic callers.
 
 ## Modules
 
 | File | Contains |
 |------|----------|
-| `SymbolResolver.ts` | `SymbolResolver` class — resolves the code symbol at a given cursor position |
+| `SymbolResolver.ts` | `SymbolResolver` class — resolves the code symbol at a given cursor position using VS Code APIs |
 
-## How SymbolResolver Works
+## How SymbolResolver Works (Legacy)
 
 1. Queries `vscode.executeDocumentSymbolProvider` to get the document's symbol tree
 2. Walks the tree with `_findDeepest()` to find the most specific symbol containing the cursor position
@@ -16,11 +18,11 @@ Symbol resolution — translating a cursor position into a `SymbolInfo` object.
 4. If the cursor is inside a function/class but not on its name, tries `vscode.executeDefinitionProvider` to resolve local variables/parameters
 5. Falls back to `document.getWordRangeAtPosition()` as last resort (returns `kind: 'unknown'`)
 
-## Key Design Decisions
+## Why It Was Replaced
 
-- **Scope chain**: Used as the primary axis for cache key resolution and tab deduplication. Two variables with the same name in different functions get different scope chains and thus different cache entries.
-- **Definition provider fallback**: Local variables don't appear as `DocumentSymbol` children in all language servers. The definition provider catches these.
-- **Kind mapping**: Maps VS Code's numeric `SymbolKind` to string identifiers (`'class'`, `'function'`, `'method'`, etc.) via `_mapSymbolKind()`.
+- `vscode.executeDocumentSymbolProvider` is **slow on large codebases** — the language server must index the entire document
+- `vscode.executeDefinitionProvider` adds another round-trip
+- The new flow gathers a lightweight `CursorContext` (word + ±50 lines) and sends it to the LLM in a single call, which both identifies the symbol kind and performs analysis
 
 ## Inputs / Outputs
 

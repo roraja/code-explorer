@@ -2,6 +2,8 @@
   "tags": {},
   "opened": {
     "01-fix-cursor-cache-lookup.md": true,
-    "01-fix-vsce-package-warnings.md": true
+    "01-fix-vsce-package-warnings.md": true,
+    "03-add-explore-all-file-symbols-command.md": true,
+    "03-update-context-files.md": true
   }
 }

@@ -17,6 +17,7 @@ import type {
   FunctionOutputInfo,
   DataFlowEntry,
   DataKindInfo,
+  DiagramEntry,
   VariableLifecycle,
   ClassMemberInfo,
   MemberAccessInfo,
@@ -526,6 +527,10 @@ export class ResponseParser {
     const memberAccess = this._parseMemberAccess(raw);
     logger.info(`ResponseParser: parsed ${memberAccess.length} member access patterns`);
 
+    // Parse diagrams from json:diagrams block
+    const diagrams = this._parseDiagrams(raw);
+    logger.info(`ResponseParser: parsed ${diagrams.length} diagrams`);
+
     return {
       overview: sections['overview'] || sections['purpose'] || sections['summary'] || '',
       keyMethods: this._parseList(sections['key methods'] || sections['key points']),
@@ -544,6 +549,7 @@ export class ResponseParser {
       potentialIssues: this._parseList(sections['potential issues'] || sections['issues']),
       variableLifecycle: variableLifecycle || undefined,
       dataKind: dataKind || undefined,
+      diagrams: diagrams.length > 0 ? diagrams : undefined,
     };
   }
 
@@ -985,6 +991,37 @@ export class ResponseParser {
         }));
     } catch (err) {
       logger.warn(`ResponseParser._parseMemberAccess: JSON parse error: ${err}`);
+      return [];
+    }
+  }
+
+  /**
+   * Extract the ```json:diagrams ... ``` fenced block and parse into DiagramEntry[].
+   */
+  private static _parseDiagrams(raw: string): DiagramEntry[] {
+    const match = raw.match(/```json:diagrams\s*\n([\s\S]*?)\n\s*```/);
+    if (!match) {
+      logger.debug('ResponseParser._parseDiagrams: no json:diagrams block found');
+      return [];
+    }
+
+    try {
+      const entries: unknown[] = JSON.parse(match[1]);
+      if (!Array.isArray(entries)) {
+        logger.warn('ResponseParser._parseDiagrams: json:diagrams is not an array');
+        return [];
+      }
+
+      return entries
+        .filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null)
+        .filter((e) => typeof e['title'] === 'string' && typeof e['mermaidSource'] === 'string')
+        .map((e) => ({
+          title: e['title'] as string,
+          type: typeof e['type'] === 'string' ? (e['type'] as string) : 'flowchart',
+          mermaidSource: e['mermaidSource'] as string,
+        }));
+    } catch (err) {
+      logger.warn(`ResponseParser._parseDiagrams: JSON parse error: ${err}`);
       return [];
     }
   }

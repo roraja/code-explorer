@@ -139,6 +139,24 @@ Describe how this variable is typically used — is it a configuration value, in
 ### Potential Issues
 List up to 3 potential concerns: unnecessary mutability, shadowing, potential null/undefined, thread safety, etc. If none, say "None detected."
 
+### Diagrams
+Generate a Mermaid **flowchart** showing this variable's data flow lifecycle — how data enters, is transformed, and exits. Show creation, mutations, and consumption points as nodes.
+
+Use valid Mermaid syntax. Keep diagrams concise (under 15 nodes). Use short, readable labels. Do NOT use special characters or HTML in node labels.
+
+Output a machine-readable JSON block:
+\`\`\`json:diagrams
+[
+  {
+    "title": "Data Flow",
+    "type": "flowchart",
+    "mermaidSource": "flowchart TD\\n  A[Created] --> B[Assigned value]\\n  B --> C[Read by func]\\n  C --> D[Returned]"
+  }
+]
+\`\`\`
+
+If not applicable (trivial variable), output an empty array: \`\`\`json:diagrams\n[]\n\`\`\`
+
 ### Related Symbols
 For each related symbol you identify, provide a brief analysis.
 

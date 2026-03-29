@@ -778,6 +778,24 @@ If no match, output:
       lines.push('');
     }
 
+    // Diagrams
+    if (result.diagrams && result.diagrams.length > 0) {
+      lines.push('## Diagrams');
+      lines.push('');
+      for (const d of result.diagrams) {
+        lines.push(`### ${d.title}`);
+        lines.push('');
+        lines.push('```mermaid');
+        lines.push(d.mermaidSource);
+        lines.push('```');
+        lines.push('');
+      }
+      lines.push('```json:diagrams');
+      lines.push(JSON.stringify(result.diagrams, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
     // Function Steps
     if (result.functionSteps && result.functionSteps.length > 0) {
       lines.push('## Step-by-Step Breakdown');
@@ -997,6 +1015,13 @@ If no match, output:
         externalAccess: boolean;
       }>(body, 'member_access');
 
+      // Parse diagrams from json:diagrams block
+      const diagrams = this._parseJsonBlock<{
+        title: string;
+        type: string;
+        mermaidSource: string;
+      }>(body, 'diagrams');
+
       return {
         symbol,
         overview: sections['overview'] || '',
@@ -1086,6 +1111,16 @@ If no match, output:
                 writtenBy: ma.writtenBy,
                 externalAccess: ma.externalAccess,
               }))
+            : undefined,
+        diagrams:
+          diagrams.length > 0
+            ? diagrams
+                .filter((d) => typeof d.title === 'string' && typeof d.mermaidSource === 'string')
+                .map((d) => ({
+                  title: d.title,
+                  type: typeof d.type === 'string' ? d.type : 'flowchart',
+                  mermaidSource: d.mermaidSource,
+                }))
             : undefined,
         metadata,
       };

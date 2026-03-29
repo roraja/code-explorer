@@ -8,6 +8,7 @@
  */
 
 import './styles/main.css';
+import mermaid from 'mermaid';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const vscode = (window as any).acquireVsCodeApi?.() ?? {
@@ -36,13 +37,51 @@ const LOADING_STAGE_LABELS: Record<string, string> = {
 
 let currentTabs: Tab[] = [];
 let currentActiveTabId: string | null = null;
+/** Auto-incrementing counter for unique mermaid diagram IDs */
+let _mermaidIdCounter = 0;
 
 function log(msg: string): void {
   console.log(`[CE] ${msg}`);
 }
 
+/**
+ * Detect whether the current VS Code theme is dark.
+ */
+function _isDarkTheme(): boolean {
+  return (
+    document.body.classList.contains('vscode-dark') ||
+    document.body.classList.contains('vscode-high-contrast')
+  );
+}
+
 function init(): void {
   log('init');
+
+  // Initialize mermaid with VS Code theme-aware settings
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: _isDarkTheme() ? 'dark' : 'default',
+    securityLevel: 'loose',
+    fontFamily: 'var(--vscode-font-family)',
+    flowchart: { useMaxWidth: true, htmlLabels: true },
+    sequence: { useMaxWidth: true },
+    themeVariables: _isDarkTheme()
+      ? {
+          primaryColor: '#264f78',
+          primaryTextColor: '#cccccc',
+          primaryBorderColor: '#3c3c3c',
+          lineColor: '#6a9955',
+          secondaryColor: '#1e1e1e',
+          tertiaryColor: '#252526',
+          background: '#1e1e1e',
+          mainBkg: '#264f78',
+          nodeBorder: '#3c3c3c',
+          clusterBkg: '#252526',
+          titleColor: '#cccccc',
+          edgeLabelBackground: '#1e1e1e',
+        }
+      : {},
+  });
 
   // Restore persisted state if available (avoids flash of empty on re-show)
   const saved = vscode.getState() as { tabs: Tab[]; activeTabId: string | null } | null;
@@ -89,6 +128,7 @@ function render(): void {
 
   root.innerHTML = renderTabBar() + renderContent(activeTab);
   attachListeners();
+  renderMermaidDiagrams();
 }
 
 function renderEmpty(): string {
@@ -530,6 +570,21 @@ function renderAnalysis(tab: Tab): string {
     sections.push(renderSection('Potential Issues', `<ul class="list">${items}</ul>`));
   }
 
+  // Diagrams (Mermaid) — rendered as placeholder divs, filled by renderMermaidDiagrams()
+  if (a.diagrams && a.diagrams.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const d of a.diagrams as any[]) {
+      if (!d.mermaidSource) {
+        continue;
+      }
+      const diagramId = `mermaid-${++_mermaidIdCounter}`;
+      const content = `<div class="diagram-container" id="${diagramId}" data-mermaid-source="${escAttr(d.mermaidSource)}">
+        <div class="diagram-loading">Rendering diagram\u2026</div>
+      </div>`;
+      sections.push(renderSection(d.title || 'Diagram', content));
+    }
+  }
+
   // Timestamp
   if (a.metadata?.analyzedAt) {
     const time = new Date(a.metadata.analyzedAt).toLocaleString();
@@ -694,6 +749,64 @@ function esc(text: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/**
+ * Escape a string for use in an HTML attribute value.
+ * Handles double quotes and newlines so mermaid source can be stored in data-* attributes.
+ */
+function escAttr(text: string): string {
+  if (!text) {
+    return '';
+  }
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '&#10;');
+}
+
+/**
+ * After DOM is updated, find all diagram-container elements with
+ * data-mermaid-source and render them via mermaid.
+ */
+async function renderMermaidDiagrams(): Promise<void> {
+  const containers = document.querySelectorAll('.diagram-container[data-mermaid-source]');
+  if (containers.length === 0) {
+    return;
+  }
+
+  log(`renderMermaidDiagrams: rendering ${containers.length} diagram(s)`);
+
+  for (const container of containers) {
+    const el = container as HTMLElement;
+    const source = el.dataset.mermaidSource;
+    if (!source) {
+      continue;
+    }
+
+    const diagramId = el.id || `mermaid-auto-${++_mermaidIdCounter}`;
+
+    try {
+      const { svg } = await mermaid.render(diagramId + '-svg', source);
+      el.innerHTML = svg;
+      el.classList.add('diagram-container--rendered');
+      el.classList.remove('diagram-container--error');
+      // Remove the data attribute so we don't re-render
+      delete el.dataset.mermaidSource;
+    } catch (err) {
+      log(`renderMermaidDiagrams: failed to render ${diagramId}: ${err}`);
+      // Show the raw source as a fallback code block
+      el.innerHTML = `<div class="diagram-error">
+        <div class="diagram-error__label">Diagram render failed</div>
+        <pre class="diagram-error__source"><code>${esc(source)}</code></pre>
+      </div>`;
+      el.classList.add('diagram-container--error');
+      // Remove the data attribute so we don't retry
+      delete el.dataset.mermaidSource;
+    }
+  }
 }
 
 // Initialize

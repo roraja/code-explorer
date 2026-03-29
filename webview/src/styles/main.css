@@ -1131,3 +1131,79 @@ a.data-flow-item__file:hover {
   text-decoration: underline;
   color: var(--vscode-textLink-activeForeground, #3794ff);
 }
+
+/* =====================
+   Mermaid Diagrams
+   ===================== */
+
+.diagram-container {
+  padding: 8px 4px;
+  border-radius: 4px;
+  background: var(--vscode-editor-background, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.06));
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.diagram-container--rendered {
+  min-height: unset;
+}
+
+.diagram-container--rendered svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.diagram-loading {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diagram-loading::before {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--vscode-progressBar-background, #0078d4);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.diagram-error {
+  width: 100%;
+}
+
+.diagram-error__label {
+  font-size: 11px;
+  color: var(--vscode-errorForeground);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.diagram-error__source {
+  margin: 0;
+  padding: 8px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, rgba(255, 255, 255, 0.05));
+  overflow-x: auto;
+}
+
+.diagram-error__source code {
+  font-family: var(--vscode-editor-font-family);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diagram-container--error {
+  border-color: var(--vscode-inputValidation-errorBorder, rgba(255, 100, 100, 0.3));
+}

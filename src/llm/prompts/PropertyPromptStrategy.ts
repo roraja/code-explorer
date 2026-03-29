@@ -120,6 +120,24 @@ Describe the access pattern: is this a cache, configuration, state flag, injecte
 ### Potential Issues
 List up to 3 concerns: unnecessary exposure, thread safety, missing validation, encapsulation violations. If none, say "None detected."
 
+### Diagrams
+Generate a Mermaid **flowchart** showing how this member is accessed — which methods write to it and which methods read from it, showing the data flow through the containing class.
+
+Use valid Mermaid syntax. Keep diagrams concise (under 15 nodes). Use short, readable labels. Do NOT use special characters or HTML in node labels.
+
+Output a machine-readable JSON block:
+\`\`\`json:diagrams
+[
+  {
+    "title": "Member Access Flow",
+    "type": "flowchart",
+    "mermaidSource": "flowchart LR\\n  constructor --> |writes| ${symbol.name}\\n  ${symbol.name} --> |read by| methodA"
+  }
+]
+\`\`\`
+
+If not applicable, output an empty array: \`\`\`json:diagrams\n[]\n\`\`\`
+
 ### Related Symbols
 For each related symbol you identify, provide a brief analysis.
 

@@ -310,6 +310,28 @@ Describe how this symbol is typically used in the codebase.
 ### Potential Issues
 List up to 3 code smells, bugs, or improvement suggestions. If none, say "None detected."
 
+### Diagrams
+Generate 1-2 Mermaid diagrams that best visualize this symbol's behavior or structure. Choose the most appropriate diagram type:
+
+- For **functions/methods**: a flowchart showing the execution path, or a sequence diagram showing interactions with sub-functions.
+- For **classes/structs/interfaces**: a class diagram showing relationships (inheritance, composition, dependencies).
+- For **variables**: a flowchart showing the data flow lifecycle (creation → mutations → consumption).
+
+Use valid Mermaid syntax. Keep diagrams concise (under 20 nodes). Use short, readable labels. Do NOT use special characters or HTML in node labels.
+
+Output a machine-readable JSON block:
+\`\`\`json:diagrams
+[
+  {
+    "title": "Call Flow",
+    "type": "flowchart",
+    "mermaidSource": "flowchart TD\\n  A[Start] --> B{Check input}\\n  B -->|valid| C[Process]\\n  B -->|invalid| D[Return error]"
+  }
+]
+\`\`\`
+
+If no diagrams are applicable (e.g., simple variables or trivial symbols), output an empty array: \`\`\`json:diagrams\n[]\n\`\`\`
+
 ### Related Symbols
 For each related symbol, provide a brief analysis.
 

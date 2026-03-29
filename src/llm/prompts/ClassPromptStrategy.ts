@@ -119,6 +119,26 @@ Describe how this ${symbol.kind} is typically instantiated and used. Is it a sin
 ### Potential Issues
 List up to 3 code smells, design issues, or improvement suggestions. If none, say "None detected."
 
+### Diagrams
+Generate 1-2 Mermaid diagrams that best visualize this ${symbol.kind}'s structure and relationships:
+- A **class diagram** showing inheritance, composition, and dependency relationships with other classes/interfaces, OR
+- A **flowchart** showing the ${symbol.kind}'s lifecycle (construction → usage → disposal).
+
+Use valid Mermaid syntax. Keep diagrams concise (under 20 nodes). Use short, readable labels. Do NOT use special characters or HTML in node labels.
+
+Output a machine-readable JSON block:
+\`\`\`json:diagrams
+[
+  {
+    "title": "Class Relationships",
+    "type": "classDiagram",
+    "mermaidSource": "classDiagram\\n  class ${symbol.name} {\\n    +method()\\n  }\\n  BaseClass <|-- ${symbol.name}"
+  }
+]
+\`\`\`
+
+If not applicable, output an empty array: \`\`\`json:diagrams\n[]\n\`\`\`
+
 ### Related Symbols
 For each related symbol you identify in the source code, provide a brief analysis.
 

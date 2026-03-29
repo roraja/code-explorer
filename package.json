@@ -28,6 +28,7 @@
     "onView:codeExplorer.sidebar",
     "onCommand:codeExplorer.exploreSymbol",
     "onCommand:codeExplorer.exploreFileSymbols",
+    "onCommand:codeExplorer.installGlobalSkills",
     "onLanguage:typescript",
     "onLanguage:javascript",
     "onLanguage:typescriptreact",
@@ -83,6 +84,11 @@
       {
         "command": "codeExplorer.analyzeWorkspace",
         "title": "Analyze Workspace",
+        "category": "Code Explorer"
+      },
+      {
+        "command": "codeExplorer.installGlobalSkills",
+        "title": "Install Global Analysis Skills (Claude + Copilot)",
         "category": "Code Explorer"
       }
     ],

@@ -29,6 +29,7 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Logger, CLI runner utility                         | `src/utils/CONTEXT.md`                      | `src/utils/logger.ts`, `src/utils/cli.ts`             |
 | Webview UI rendering (browser-side)                | `webview/CONTEXT.md`                        | `webview/src/main.ts`, `webview/src/styles/main.css`  |
 | Tests (unit, integration)                          | `test/CONTEXT.md`                           | `test/unit/**/*.test.ts`                              |
+| Global skill installation (Claude + Copilot)       | `src/skills/CONTEXT.md`                     | `src/skills/SkillInstaller.ts`                        |
 
 ## Key Features (Current State)
 
@@ -68,6 +69,7 @@ Only load additional contexts if the task clearly spans multiple modules.
 | **MCP server**                 | Not implemented | Planned in `src/mcp/`                     |
 | **File watcher invalidation**  | Not implemented | Planned                                   |
 | **Analyze Workspace command**  | Stub only | `extension.ts` (shows "future release" message)  |
+| **Install Global Skills command** | Implemented | `extension.ts`, `SkillInstaller.ts`            |
 
 ## Data Flow
 

@@ -20,6 +20,7 @@ export const COMMANDS = {
   REFRESH_ANALYSIS: 'codeExplorer.refreshAnalysis',
   CLEAR_CACHE: 'codeExplorer.clearCache',
   ANALYZE_WORKSPACE: 'codeExplorer.analyzeWorkspace',
+  INSTALL_GLOBAL_SKILLS: 'codeExplorer.installGlobalSkills',
 } as const;
 
 /** Configuration setting keys (under "codeExplorer." namespace). */

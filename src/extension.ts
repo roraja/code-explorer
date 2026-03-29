@@ -13,6 +13,7 @@ import { AnalysisOrchestrator } from './analysis/AnalysisOrchestrator';
 import { CacheStore } from './cache/CacheStore';
 import { LLMProviderFactory } from './llm/LLMProviderFactory';
 import { logger, LogLevel } from './utils/logger';
+import { SkillInstaller } from './skills/SkillInstaller';
 import type { CursorContext } from './models/types';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -170,6 +171,71 @@ export function activate(context: vscode.ExtensionContext): void {
       logger.info('Analyze workspace requested');
       vscode.window.showInformationMessage(
         'Workspace analysis will be available in a future release.'
+      );
+    }),
+
+    vscode.commands.registerCommand(COMMANDS.INSTALL_GLOBAL_SKILLS, async () => {
+      logger.info('Command: installGlobalSkills invoked');
+
+      const installer = new SkillInstaller();
+      const status = await installer.isInstalled();
+
+      if (status.claude && status.copilot) {
+        const action = await vscode.window.showInformationMessage(
+          'Code Explorer skills are already installed for Claude and Copilot.',
+          'Reinstall',
+          'Uninstall'
+        );
+
+        if (action === 'Uninstall') {
+          const uninstallResult = await installer.uninstall();
+          if (uninstallResult.errors.length === 0) {
+            vscode.window.showInformationMessage(
+              'Code Explorer skills uninstalled from Claude and Copilot.'
+            );
+          } else {
+            vscode.window.showWarningMessage(
+              `Partial uninstall: ${uninstallResult.errors.join('; ')}`
+            );
+          }
+          return;
+        } else if (action !== 'Reinstall') {
+          return;
+        }
+      }
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Code Explorer: Installing global skills...',
+          cancellable: false,
+        },
+        async () => {
+          const result = await installer.install();
+
+          const installed: string[] = [];
+          if (result.claudeInstalled) {
+            installed.push(`Claude (${result.claudePath})`);
+          }
+          if (result.copilotInstalled) {
+            installed.push(`Copilot (${result.copilotPath})`);
+          }
+
+          if (result.errors.length === 0) {
+            vscode.window.showInformationMessage(
+              `Code Explorer analysis skill installed for: ${installed.join(', ')}. ` +
+                `Use "analyze file <path>" or "code-explorer analyze <path>" in either agent.`
+            );
+          } else {
+            vscode.window.showWarningMessage(
+              `Partial install (${installed.join(', ')}). Errors: ${result.errors.join('; ')}`
+            );
+          }
+
+          logger.info(
+            `installGlobalSkills: claude=${result.claudeInstalled}, copilot=${result.copilotInstalled}`
+          );
+        }
       );
     }),
 

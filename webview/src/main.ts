@@ -93,13 +93,34 @@ function render(): void {
 
 function renderEmpty(): string {
   return `<div class="empty-state">
-    <div class="empty-state__icon">🔍</div>
+    <div class="empty-state__icon">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        <line x1="8" y1="11" x2="14" y2="11"/>
+        <line x1="11" y1="8" x2="11" y2="14"/>
+      </svg>
+    </div>
     <h2 class="empty-state__title">Code Explorer</h2>
     <p class="empty-state__description">
-      Click on a symbol in your code, then run<br>
-      <strong>Code Explorer: Explore Symbol</strong><br>
-      or press <kbd>Ctrl+Shift+H</kbd>
+      Place your cursor on any symbol and press<br>
+      <kbd>Ctrl+Shift+H</kbd><br>
+      <span class="empty-state__hint">or right-click &rarr; Explore Symbol</span>
     </p>
+    <div class="empty-state__features">
+      <div class="empty-state__feature">
+        <span class="empty-state__feature-icon">ƒ</span>
+        <span>Functions &amp; Methods</span>
+      </div>
+      <div class="empty-state__feature">
+        <span class="empty-state__feature-icon">🅲</span>
+        <span>Classes &amp; Structs</span>
+      </div>
+      <div class="empty-state__feature">
+        <span class="empty-state__feature-icon">𝑥</span>
+        <span>Variables &amp; Properties</span>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -162,11 +183,17 @@ function renderAnalysis(tab: Tab): string {
   const a = tab.analysis;
   const sections: string[] = [];
 
-  // Header
+  // Header with file breadcrumb
+  const fileBreadcrumb = tab.symbol.filePath
+    ? `<div class="symbol-header__breadcrumb" title="${esc(tab.symbol.filePath)}">${esc(shortPath(tab.symbol.filePath))}</div>`
+    : '';
   sections.push(`<div class="symbol-header">
-    <span class="symbol-header__icon">${kindIcon(tab.symbol.kind)}</span>
-    <span class="symbol-header__kind">${esc(tab.symbol.kind)}</span>
-    <span class="symbol-header__name">${esc(tab.symbol.name)}</span>
+    <div class="symbol-header__main">
+      <span class="symbol-header__icon">${kindIcon(tab.symbol.kind)}</span>
+      <span class="symbol-header__kind">${esc(tab.symbol.kind)}</span>
+      <span class="symbol-header__name">${esc(tab.symbol.name)}</span>
+    </div>
+    ${fileBreadcrumb}
   </div>`);
 
   // LLM badge
@@ -216,9 +243,9 @@ function renderAnalysis(tab: Tab): string {
 
   // Step-by-Step Breakdown (numbered functionalities)
   if (a.functionSteps && a.functionSteps.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const items = a.functionSteps
       .map(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (s: any) =>
           `<li class="step-item"><span class="step-item__number">${s.step}.</span> ${esc(s.description)}</li>`
       )
@@ -228,8 +255,8 @@ function renderAnalysis(tab: Tab): string {
 
   // Sub-Functions
   if (a.subFunctions && a.subFunctions.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const items = a.subFunctions
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((sf: any) => {
         const linkAttrs = sf.filePath
           ? ` data-symbol-name="${esc(sf.name)}" data-symbol-file="${esc(sf.filePath)}" data-symbol-line="${sf.line || 0}" data-symbol-kind="${esc(sf.kind || 'function')}"`
@@ -260,8 +287,8 @@ function renderAnalysis(tab: Tab): string {
 
   // Function Input
   if (a.functionInputs && a.functionInputs.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const items = a.functionInputs
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((p: any) => {
         const typeLinkAttrs = p.typeFilePath
           ? ` data-symbol-name="${esc(p.typeName)}" data-symbol-file="${esc(p.typeFilePath)}" data-symbol-line="${p.typeLine || 0}" data-symbol-kind="${esc(p.typeKind || 'type')}"`
@@ -314,8 +341,8 @@ function renderAnalysis(tab: Tab): string {
 
   // Class Members
   if (a.classMembers && a.classMembers.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const items = a.classMembers
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((m: any) => {
         const staticBadge = m.isStatic
           ? '<span class="badge badge--static-member">static</span>'
@@ -342,8 +369,8 @@ function renderAnalysis(tab: Tab): string {
 
   // Member Access Patterns
   if (a.memberAccess && a.memberAccess.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const items = a.memberAccess
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((ma: any) => {
         const externalBadge = ma.externalAccess
           ? '<span class="badge badge--external">external</span>'
@@ -408,8 +435,8 @@ function renderAnalysis(tab: Tab): string {
 
   // Data Flow
   if (a.dataFlow && a.dataFlow.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const items = a.dataFlow
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((df: any) => {
         const typeLabel = dataFlowIcon(df.type);
         return `<div class="data-flow-item">
@@ -598,9 +625,35 @@ function kindIcon(kind: string): string {
     type: '𝑇',
     enum: 'ℰ',
     property: '𝑝',
+    parameter: '𝑎',
     struct: '🅂',
   };
   return icons[kind] || '◆';
+}
+
+function memberKindIcon(memberKind: string): string {
+  const icons: Record<string, string> = {
+    field: '𝑥',
+    method: '𝑚',
+    property: '𝑝',
+    constructor: '⊕',
+    getter: '↗',
+    setter: '↙',
+  };
+  return icons[memberKind] || '·';
+}
+
+function dataFlowIcon(flowType: string): string {
+  const icons: Record<string, string> = {
+    created: '⊕ created',
+    assigned: '← assigned',
+    read: '→ read',
+    modified: '⚡ modified',
+    consumed: '✓ consumed',
+    returned: '↩ returned',
+    passed: '→ passed',
+  };
+  return icons[flowType] || flowType;
 }
 
 function shortPath(filePath: string): string {

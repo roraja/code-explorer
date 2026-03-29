@@ -778,6 +778,63 @@ If no match, output:
       lines.push('');
     }
 
+    // Function Steps
+    if (result.functionSteps && result.functionSteps.length > 0) {
+      lines.push('## Step-by-Step Breakdown');
+      lines.push('');
+      for (const step of result.functionSteps) {
+        lines.push(`${step.step}. ${step.description}`);
+      }
+      lines.push('');
+      lines.push('```json:steps');
+      lines.push(JSON.stringify(result.functionSteps, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
+    // Sub-Functions
+    if (result.subFunctions && result.subFunctions.length > 0) {
+      lines.push('## Sub-Functions');
+      lines.push('');
+      for (const sf of result.subFunctions) {
+        lines.push(`- **${sf.name}** — ${sf.description}`);
+      }
+      lines.push('');
+      lines.push('```json:subfunctions');
+      lines.push(JSON.stringify(result.subFunctions, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
+    // Function Inputs
+    if (result.functionInputs && result.functionInputs.length > 0) {
+      lines.push('## Function Input');
+      lines.push('');
+      for (const fi of result.functionInputs) {
+        const mutLabel = fi.mutated ? ' (mutated)' : '';
+        lines.push(`- **${fi.name}**: \`${fi.typeName}\` — ${fi.description}${mutLabel}`);
+      }
+      lines.push('');
+      lines.push('```json:function_inputs');
+      lines.push(JSON.stringify(result.functionInputs, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
+    // Function Output
+    if (result.functionOutput && result.functionOutput.typeName) {
+      lines.push('## Function Output');
+      lines.push('');
+      lines.push(
+        `Returns: \`${result.functionOutput.typeName}\` — ${result.functionOutput.description}`
+      );
+      lines.push('');
+      lines.push('```json:function_output');
+      lines.push(JSON.stringify(result.functionOutput, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
     // Dependencies
     if (result.dependencies && result.dependencies.length > 0) {
       lines.push('## Dependencies');
@@ -845,6 +902,59 @@ If no match, output:
       // Parse callers from json:callers block
       const { callStacks, usages } = this._parseCallersJson(body);
 
+      // Parse function steps from json:steps block
+      const stepsRaw = this._parseJsonBlock<{ step: number; description: string }>(body, 'steps');
+      const functionSteps =
+        stepsRaw.length > 0
+          ? stepsRaw.filter((s) => typeof s.step === 'number' && typeof s.description === 'string')
+          : undefined;
+
+      // Parse sub-functions from json:subfunctions block
+      const subFunctionsRaw = this._parseJsonBlock<{
+        name: string;
+        description: string;
+        input: string;
+        output: string;
+        filePath?: string;
+        line?: number;
+        kind?: string;
+      }>(body, 'subfunctions');
+      const subFunctions =
+        subFunctionsRaw.length > 0
+          ? subFunctionsRaw.filter((s) => typeof s.name === 'string')
+          : undefined;
+
+      // Parse function inputs from json:function_inputs block
+      const fnInputsRaw = this._parseJsonBlock<{
+        name: string;
+        typeName: string;
+        description: string;
+        mutated: boolean;
+        mutationDetail?: string;
+        typeFilePath?: string;
+        typeLine?: number;
+        typeKind?: string;
+        typeOverview?: string;
+      }>(body, 'function_inputs');
+      const functionInputs =
+        fnInputsRaw.length > 0
+          ? fnInputsRaw.filter(
+              (f) => typeof f.name === 'string' && typeof f.typeName === 'string'
+            )
+          : undefined;
+
+      // Parse function output from json:function_output block
+      const fnOutputRaw = this._parseJsonObjectBlock<{
+        typeName: string;
+        description: string;
+        typeFilePath?: string;
+        typeLine?: number;
+        typeKind?: string;
+        typeOverview?: string;
+      }>(body, 'function_output');
+      const functionOutput =
+        fnOutputRaw && typeof fnOutputRaw.typeName === 'string' ? fnOutputRaw : undefined;
+
       // Parse data flow from json:data_flow block
       const dataFlow = this._parseJsonBlock<{
         type: string;
@@ -902,6 +1012,41 @@ If no match, output:
         })),
         relationships: [],
         keyMethods: this._parseList(sections['key points']),
+        functionSteps,
+        subFunctions: subFunctions
+          ? subFunctions.map((s) => ({
+              name: s.name,
+              description: s.description || '',
+              input: s.input || '',
+              output: s.output || '',
+              filePath: s.filePath,
+              line: s.line,
+              kind: s.kind,
+            }))
+          : undefined,
+        functionInputs: functionInputs
+          ? functionInputs.map((f) => ({
+              name: f.name,
+              typeName: f.typeName,
+              description: f.description || '',
+              mutated: f.mutated === true,
+              mutationDetail: f.mutationDetail,
+              typeFilePath: f.typeFilePath,
+              typeLine: f.typeLine,
+              typeKind: f.typeKind,
+              typeOverview: f.typeOverview,
+            }))
+          : undefined,
+        functionOutput: functionOutput
+          ? {
+              typeName: functionOutput.typeName,
+              description: functionOutput.description || '',
+              typeFilePath: functionOutput.typeFilePath,
+              typeLine: functionOutput.typeLine,
+              typeKind: functionOutput.typeKind,
+              typeOverview: functionOutput.typeOverview,
+            }
+          : undefined,
         dependencies: this._parseList(sections['dependencies']),
         usagePattern: sections['usage pattern'] || '',
         potentialIssues: this._parseList(sections['potential issues']),

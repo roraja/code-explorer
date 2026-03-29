@@ -265,6 +265,7 @@ export class AnalysisOrchestrator {
       functionOutput: llmResult.functionOutput,
       classMembers: llmResult.classMembers,
       memberAccess: llmResult.memberAccess,
+      dataKind: llmResult.dataKind,
       metadata: {
         analyzedAt: new Date().toISOString(),
         sourceHash: '',
@@ -513,6 +514,7 @@ export class AnalysisOrchestrator {
       functionOutput: llmResult.functionOutput,
       classMembers: llmResult.classMembers,
       memberAccess: llmResult.memberAccess,
+      dataKind: llmResult.dataKind,
       metadata: {
         analyzedAt: new Date().toISOString(),
         sourceHash: '',

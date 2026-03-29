@@ -58,7 +58,12 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push({ dispose: () => orchestrator.dispose() });
 
   // --- UI Layer ---
-  const viewProvider = new CodeExplorerViewProvider(context.extensionUri, orchestrator);
+  const viewProvider = new CodeExplorerViewProvider(
+    context.extensionUri,
+    orchestrator,
+    cacheStore,
+    workspaceRoot
+  );
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(VIEW_ID, viewProvider, {
@@ -69,291 +74,333 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- Commands ---
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMANDS.EXPLORE_SYMBOL, async (symbolOrUndefined) => {
-      logger.info('Command: exploreSymbol invoked');
+      logger.startCommandLog('explore-symbol');
+      try {
+        logger.info('Command: exploreSymbol invoked');
 
-      // The argument may be a SymbolInfo (from programmatic call),
-      // a Uri (from context menu), or undefined (from keybinding/command palette).
-      // Only use it if it looks like a SymbolInfo.
-      const symbol =
-        symbolOrUndefined &&
-        typeof symbolOrUndefined === 'object' &&
-        'name' in symbolOrUndefined &&
-        'kind' in symbolOrUndefined &&
-        'filePath' in symbolOrUndefined &&
-        'position' in symbolOrUndefined
-          ? symbolOrUndefined
-          : undefined;
+        // The argument may be a SymbolInfo (from programmatic call),
+        // a Uri (from context menu), or undefined (from keybinding/command palette).
+        // Only use it if it looks like a SymbolInfo.
+        const symbol =
+          symbolOrUndefined &&
+          typeof symbolOrUndefined === 'object' &&
+          'name' in symbolOrUndefined &&
+          'kind' in symbolOrUndefined &&
+          'filePath' in symbolOrUndefined &&
+          'position' in symbolOrUndefined
+            ? symbolOrUndefined
+            : undefined;
 
-      if (symbol) {
-        // Programmatic call with a pre-resolved SymbolInfo — use legacy flow
-        logger.info(
-          `exploreSymbol: focusing sidebar and opening tab for ${symbol.kind} ${symbol.name}`
+        if (symbol) {
+          // Programmatic call with a pre-resolved SymbolInfo — use legacy flow
+          logger.info(
+            `exploreSymbol: focusing sidebar and opening tab for ${symbol.kind} ${symbol.name}`
+          );
+          await vscode.commands.executeCommand('codeExplorer.sidebar.focus');
+          viewProvider.openTab(symbol);
+          return;
+        }
+
+        // New flow: gather lightweight cursor context and let the LLM resolve + analyze
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+          logger.warn('exploreSymbol: no active editor');
+          vscode.window.showWarningMessage(
+            'No active editor. Open a file and place cursor on a symbol.'
+          );
+          return;
+        }
+
+        const position = editor.selection.active;
+        const wordRange = editor.document.getWordRangeAtPosition(position);
+        if (!wordRange) {
+          logger.warn('exploreSymbol: no word at cursor position');
+          vscode.window.showWarningMessage('No symbol found at cursor position.');
+          return;
+        }
+
+        const word = editor.document.getText(wordRange);
+        const relPath = path.relative(workspaceRoot, editor.document.fileName);
+
+        // Gather surrounding source code (±50 lines for context)
+        const startLine = Math.max(0, position.line - 50);
+        const endLine = Math.min(editor.document.lineCount - 1, position.line + 50);
+        const surroundingRange = new vscode.Range(
+          startLine,
+          0,
+          endLine,
+          editor.document.lineAt(endLine).text.length
         );
+        const surroundingSource = editor.document.getText(surroundingRange);
+        const cursorLine = editor.document.lineAt(position.line).text;
+
+        const cursorContext: CursorContext = {
+          word,
+          filePath: relPath,
+          position: { line: position.line, character: position.character },
+          surroundingSource,
+          cursorLine,
+        };
+
+        logger.debug(
+          `exploreSymbol: cursor context — word="${word}" in ${relPath}:${position.line}:${position.character}`
+        );
+
+        // Ensure the sidebar is visible and open a tab via cursor-based flow
         await vscode.commands.executeCommand('codeExplorer.sidebar.focus');
-        viewProvider.openTab(symbol);
-        return;
+        viewProvider.openTabFromCursor(cursorContext);
+      } finally {
+        logger.endCommandLog();
       }
-
-      // New flow: gather lightweight cursor context and let the LLM resolve + analyze
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        logger.warn('exploreSymbol: no active editor');
-        vscode.window.showWarningMessage(
-          'No active editor. Open a file and place cursor on a symbol.'
-        );
-        return;
-      }
-
-      const position = editor.selection.active;
-      const wordRange = editor.document.getWordRangeAtPosition(position);
-      if (!wordRange) {
-        logger.warn('exploreSymbol: no word at cursor position');
-        vscode.window.showWarningMessage('No symbol found at cursor position.');
-        return;
-      }
-
-      const word = editor.document.getText(wordRange);
-      const relPath = path.relative(workspaceRoot, editor.document.fileName);
-
-      // Gather surrounding source code (±50 lines for context)
-      const startLine = Math.max(0, position.line - 50);
-      const endLine = Math.min(editor.document.lineCount - 1, position.line + 50);
-      const surroundingRange = new vscode.Range(
-        startLine,
-        0,
-        endLine,
-        editor.document.lineAt(endLine).text.length
-      );
-      const surroundingSource = editor.document.getText(surroundingRange);
-      const cursorLine = editor.document.lineAt(position.line).text;
-
-      const cursorContext: CursorContext = {
-        word,
-        filePath: relPath,
-        position: { line: position.line, character: position.character },
-        surroundingSource,
-        cursorLine,
-      };
-
-      logger.debug(
-        `exploreSymbol: cursor context — word="${word}" in ${relPath}:${position.line}:${position.character}`
-      );
-
-      // Ensure the sidebar is visible and open a tab via cursor-based flow
-      await vscode.commands.executeCommand('codeExplorer.sidebar.focus');
-      viewProvider.openTabFromCursor(cursorContext);
     }),
 
     vscode.commands.registerCommand(COMMANDS.REFRESH_ANALYSIS, () => {
-      logger.info('Refresh analysis requested');
-      vscode.window.showInformationMessage('Use the refresh button on a tab to re-analyze.');
+      logger.startCommandLog('refresh-analysis');
+      try {
+        logger.info('Refresh analysis requested');
+        vscode.window.showInformationMessage('Use the refresh button on a tab to re-analyze.');
+      } finally {
+        logger.endCommandLog();
+      }
     }),
 
     vscode.commands.registerCommand(COMMANDS.CLEAR_CACHE, async () => {
-      logger.info('Command: clearCache invoked');
-      const confirm = await vscode.window.showWarningMessage(
-        'Clear all Code Explorer cached analysis?',
-        { modal: true },
-        'Clear'
-      );
-      if (confirm === 'Clear') {
-        try {
-          await cacheStore.clear();
-          logger.info('Cache cleared');
-          vscode.window.showInformationMessage('Code Explorer cache cleared.');
-        } catch (err) {
-          logger.error(`Failed to clear cache: ${err}`);
-          vscode.window.showErrorMessage('Failed to clear cache.');
+      logger.startCommandLog('clear-cache');
+      try {
+        logger.info('Command: clearCache invoked');
+        const confirm = await vscode.window.showWarningMessage(
+          'Clear all Code Explorer cached analysis?',
+          { modal: true },
+          'Clear'
+        );
+        if (confirm === 'Clear') {
+          try {
+            await cacheStore.clear();
+            logger.info('Cache cleared');
+            vscode.window.showInformationMessage('Code Explorer cache cleared.');
+          } catch (err) {
+            logger.error(`Failed to clear cache: ${err}`);
+            vscode.window.showErrorMessage('Failed to clear cache.');
+          }
         }
+      } finally {
+        logger.endCommandLog();
       }
     }),
 
     vscode.commands.registerCommand(COMMANDS.ANALYZE_WORKSPACE, () => {
-      logger.info('Analyze workspace requested');
-      vscode.window.showInformationMessage(
-        'Workspace analysis will be available in a future release.'
-      );
+      logger.startCommandLog('analyze-workspace');
+      try {
+        logger.info('Analyze workspace requested');
+        vscode.window.showInformationMessage(
+          'Workspace analysis will be available in a future release.'
+        );
+      } finally {
+        logger.endCommandLog();
+      }
     }),
 
     vscode.commands.registerCommand(COMMANDS.INSTALL_GLOBAL_SKILLS, async () => {
-      logger.info('Command: installGlobalSkills invoked');
+      logger.startCommandLog('install-global-skills');
+      try {
+        logger.info('Command: installGlobalSkills invoked');
 
-      const installer = new SkillInstaller();
-      const status = await installer.isInstalled();
+        const installer = new SkillInstaller();
+        const status = await installer.isInstalled();
 
-      if (status.claude && status.copilot) {
-        const action = await vscode.window.showInformationMessage(
-          'Code Explorer skills are already installed for Claude and Copilot.',
-          'Reinstall',
-          'Uninstall'
-        );
-
-        if (action === 'Uninstall') {
-          const uninstallResult = await installer.uninstall();
-          if (uninstallResult.errors.length === 0) {
-            vscode.window.showInformationMessage(
-              'Code Explorer skills uninstalled from Claude and Copilot.'
-            );
-          } else {
-            vscode.window.showWarningMessage(
-              `Partial uninstall: ${uninstallResult.errors.join('; ')}`
-            );
-          }
-          return;
-        } else if (action !== 'Reinstall') {
-          return;
-        }
-      }
-
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Code Explorer: Installing global skills...',
-          cancellable: false,
-        },
-        async () => {
-          const result = await installer.install();
-
-          const installed: string[] = [];
-          if (result.claudeInstalled) {
-            installed.push(`Claude (${result.claudePath})`);
-          }
-          if (result.copilotInstalled) {
-            installed.push(`Copilot (${result.copilotPath})`);
-          }
-
-          if (result.errors.length === 0) {
-            vscode.window.showInformationMessage(
-              `Code Explorer analysis skill installed for: ${installed.join(', ')}. ` +
-                `Use "analyze file <path>" or "code-explorer analyze <path>" in either agent.`
-            );
-          } else {
-            vscode.window.showWarningMessage(
-              `Partial install (${installed.join(', ')}). Errors: ${result.errors.join('; ')}`
-            );
-          }
-
-          logger.info(
-            `installGlobalSkills: claude=${result.claudeInstalled}, copilot=${result.copilotInstalled}`
+        if (status.claude && status.copilot) {
+          const action = await vscode.window.showInformationMessage(
+            'Code Explorer skills are already installed for Claude and Copilot.',
+            'Reinstall',
+            'Uninstall'
           );
-        }
-      );
-    }),
 
-    vscode.commands.registerCommand(COMMANDS.EXPLORE_FILE_SYMBOLS, async () => {
-      logger.info('Command: exploreFileSymbols invoked');
-
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        logger.warn('exploreFileSymbols: no active editor');
-        vscode.window.showWarningMessage('No active editor. Open a file to explore its symbols.');
-        return;
-      }
-
-      const filePath = path.relative(workspaceRoot, editor.document.fileName);
-      const fileSource = editor.document.getText();
-
-      if (!fileSource.trim()) {
-        logger.warn('exploreFileSymbols: file is empty');
-        vscode.window.showWarningMessage('The current file is empty.');
-        return;
-      }
-
-      logger.info(`exploreFileSymbols: analyzing ${filePath} (${fileSource.length} chars)`);
-
-      // Show progress notification while running
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `Code Explorer: Analyzing all symbols in ${path.basename(filePath)}`,
-          cancellable: false,
-        },
-        async (progress) => {
-          try {
-            const cachedCount = await orchestrator.analyzeFile(
-              filePath,
-              fileSource,
-              (stage, detail) => {
-                progress.report({ message: detail || stage });
-              }
-            );
-
-            if (cachedCount > 0) {
+          if (action === 'Uninstall') {
+            const uninstallResult = await installer.uninstall();
+            if (uninstallResult.errors.length === 0) {
               vscode.window.showInformationMessage(
-                `Code Explorer: Cached ${cachedCount} symbol${cachedCount > 1 ? 's' : ''} from ${path.basename(filePath)}. ` +
-                  `Use "Explore Symbol" (Ctrl+Shift+E) on any symbol for instant results.`
+                'Code Explorer skills uninstalled from Claude and Copilot.'
               );
             } else {
               vscode.window.showWarningMessage(
-                `Code Explorer: No symbols were cached for ${path.basename(filePath)}. ` +
-                  `The LLM may not have been available or the file has no analyzable symbols.`
+                `Partial uninstall: ${uninstallResult.errors.join('; ')}`
               );
             }
-          } catch (err) {
-            logger.error(`exploreFileSymbols: failed: ${err}`);
-            vscode.window.showErrorMessage(
-              `Code Explorer: Failed to analyze file. Check the Output panel for details.`
-            );
+            return;
+          } else if (action !== 'Reinstall') {
+            return;
           }
         }
-      );
+
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Code Explorer: Installing global skills...',
+            cancellable: false,
+          },
+          async () => {
+            const result = await installer.install();
+
+            const installed: string[] = [];
+            if (result.claudeInstalled) {
+              installed.push(`Claude (${result.claudePath})`);
+            }
+            if (result.copilotInstalled) {
+              installed.push(`Copilot (${result.copilotPath})`);
+            }
+
+            if (result.errors.length === 0) {
+              vscode.window.showInformationMessage(
+                `Code Explorer analysis skill installed for: ${installed.join(', ')}. ` +
+                  `Use "analyze file <path>" or "code-explorer analyze <path>" in either agent.`
+              );
+            } else {
+              vscode.window.showWarningMessage(
+                `Partial install (${installed.join(', ')}). Errors: ${result.errors.join('; ')}`
+              );
+            }
+
+            logger.info(
+              `installGlobalSkills: claude=${result.claudeInstalled}, copilot=${result.copilotInstalled}`
+            );
+          }
+        );
+      } finally {
+        logger.endCommandLog();
+      }
+    }),
+
+    vscode.commands.registerCommand(COMMANDS.EXPLORE_FILE_SYMBOLS, async () => {
+      logger.startCommandLog('explore-file-symbols');
+      try {
+        logger.info('Command: exploreFileSymbols invoked');
+
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+          logger.warn('exploreFileSymbols: no active editor');
+          vscode.window.showWarningMessage(
+            'No active editor. Open a file to explore its symbols.'
+          );
+          return;
+        }
+
+        const filePath = path.relative(workspaceRoot, editor.document.fileName);
+        const fileSource = editor.document.getText();
+
+        if (!fileSource.trim()) {
+          logger.warn('exploreFileSymbols: file is empty');
+          vscode.window.showWarningMessage('The current file is empty.');
+          return;
+        }
+
+        logger.info(`exploreFileSymbols: analyzing ${filePath} (${fileSource.length} chars)`);
+
+        // Show progress notification while running
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Code Explorer: Analyzing all symbols in ${path.basename(filePath)}`,
+            cancellable: false,
+          },
+          async (progress) => {
+            try {
+              const cachedCount = await orchestrator.analyzeFile(
+                filePath,
+                fileSource,
+                (stage, detail) => {
+                  progress.report({ message: detail || stage });
+                }
+              );
+
+              if (cachedCount > 0) {
+                vscode.window.showInformationMessage(
+                  `Code Explorer: Cached ${cachedCount} symbol${cachedCount > 1 ? 's' : ''} from ${path.basename(filePath)}. ` +
+                    `Use "Explore Symbol" (Ctrl+Shift+E) on any symbol for instant results.`
+                );
+              } else {
+                vscode.window.showWarningMessage(
+                  `Code Explorer: No symbols were cached for ${path.basename(filePath)}. ` +
+                    `The LLM may not have been available or the file has no analyzable symbols.`
+                );
+              }
+            } catch (err) {
+              logger.error(`exploreFileSymbols: failed: ${err}`);
+              vscode.window.showErrorMessage(
+                `Code Explorer: Failed to analyze file. Check the Output panel for details.`
+              );
+            }
+          }
+        );
+      } finally {
+        logger.endCommandLog();
+      }
     }),
 
     vscode.commands.registerCommand(COMMANDS.PULL_ADO_CONTENT, async () => {
-      logger.info('Command: pullAdoContent invoked');
+      logger.startCommandLog('pull-ado-content');
+      try {
+        logger.info('Command: pullAdoContent invoked');
 
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Code Explorer: Pulling content from ADO...',
-          cancellable: false,
-        },
-        async () => {
-          const result = await pullAdoContent(workspaceRoot);
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Code Explorer: Pulling content from ADO...',
+            cancellable: false,
+          },
+          async () => {
+            const result = await pullAdoContent(workspaceRoot);
 
-          if (result.success) {
-            vscode.window.showInformationMessage(`Code Explorer: ${result.message}`);
-          } else {
-            vscode.window.showErrorMessage(`Code Explorer: ${result.message}`);
+            if (result.success) {
+              vscode.window.showInformationMessage(`Code Explorer: ${result.message}`);
+            } else {
+              vscode.window.showErrorMessage(`Code Explorer: ${result.message}`);
+            }
+
+            logger.info(`pullAdoContent: ${result.message}`);
+            logger.debug(`pullAdoContent details:\n${result.details}`);
           }
-
-          logger.info(`pullAdoContent: ${result.message}`);
-          logger.debug(`pullAdoContent details:\n${result.details}`);
-        }
-      );
+        );
+      } finally {
+        logger.endCommandLog();
+      }
     }),
 
     vscode.commands.registerCommand(COMMANDS.PUSH_ADO_CONTENT, async () => {
-      logger.info('Command: pushAdoContent invoked');
+      logger.startCommandLog('push-ado-content');
+      try {
+        logger.info('Command: pushAdoContent invoked');
 
-      const confirm = await vscode.window.showWarningMessage(
-        'Push Code Explorer content to ADO? This will pull latest changes first, then push.',
-        { modal: true },
-        'Push'
-      );
-      if (confirm !== 'Push') {
-        return;
-      }
-
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Code Explorer: Pushing content to ADO...',
-          cancellable: false,
-        },
-        async () => {
-          const result = await pushAdoContent(workspaceRoot);
-
-          if (result.success) {
-            vscode.window.showInformationMessage(`Code Explorer: ${result.message}`);
-          } else {
-            vscode.window.showErrorMessage(`Code Explorer: ${result.message}`);
-          }
-
-          logger.info(`pushAdoContent: ${result.message}`);
-          logger.debug(`pushAdoContent details:\n${result.details}`);
+        const confirm = await vscode.window.showWarningMessage(
+          'Push Code Explorer content to ADO? This will pull latest changes first, then push.',
+          { modal: true },
+          'Push'
+        );
+        if (confirm !== 'Push') {
+          return;
         }
-      );
+
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Code Explorer: Pushing content to ADO...',
+            cancellable: false,
+          },
+          async () => {
+            const result = await pushAdoContent(workspaceRoot);
+
+            if (result.success) {
+              vscode.window.showInformationMessage(`Code Explorer: ${result.message}`);
+            } else {
+              vscode.window.showErrorMessage(`Code Explorer: ${result.message}`);
+            }
+
+            logger.info(`pushAdoContent: ${result.message}`);
+            logger.debug(`pushAdoContent details:\n${result.details}`);
+          }
+        );
+      } finally {
+        logger.endCommandLog();
+      }
     })
   );
 

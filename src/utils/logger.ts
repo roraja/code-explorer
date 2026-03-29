@@ -3,7 +3,7 @@
  *
  * Dual-output logger:
  * 1. VS Code OutputChannel — visible in the "Code Explorer" output panel
- * 2. File log — persisted at <workspace>/.vscode/code-explorer/logs/<date>.log
+ * 2. File log — persisted at <workspace>/.vscode/code-explorer-logs/<date>.log
  *
  * Log files are rotated daily. All severity levels (DEBUG through ERROR) are
  * written to both destinations so nothing is lost.
@@ -11,7 +11,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { EXTENSION_DISPLAY_NAME, CACHE } from '../models/constants';
+import { EXTENSION_DISPLAY_NAME } from '../models/constants';
 
 export enum LogLevel {
   DEBUG = 0,
@@ -37,6 +37,10 @@ let _extensionVersion: string | undefined;
 let _llmCallCounter = 0;
 let _llmLogDir: string | undefined;
 let _activeLLMLogFile: string | undefined;
+let _commandCallCounter = 0;
+let _commandLogDir: string | undefined;
+let _activeCommandLogStream: fs.WriteStream | undefined;
+let _activeCommandLogFile: string | undefined;
 
 // ── helpers ──────────────────────────────────────────────
 
@@ -133,6 +137,11 @@ function emit(level: LogLevel, message: string, args: unknown[]): void {
   if (stream) {
     stream.write(line + '\n');
   }
+
+  // 3. Per-command log file (if a command session is active)
+  if (_activeCommandLogStream) {
+    _activeCommandLogStream.write(line + '\n');
+  }
 }
 
 // ── public API (unchanged from before) ──────────────────
@@ -141,12 +150,14 @@ export const logger = {
   /**
    * Initialise file logging.
    * Call once during activation with the workspace root path.
-   * Creates .vscode/code-explorer/logs/ if it does not exist.
+   * Creates .vscode/code-explorer-logs/ if it does not exist.
    */
   init(workspaceRoot: string, version?: string): void {
-    _logDir = path.join(workspaceRoot, '.vscode', CACHE.DIR_NAME, 'logs');
+    _logDir = path.join(workspaceRoot, '.vscode', 'code-explorer-logs');
     _llmLogDir = path.join(_logDir, 'llms');
+    _commandLogDir = path.join(_logDir, 'commands');
     _llmCallCounter = 0;
+    _commandCallCounter = 0;
     _sessionId = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
     _extensionVersion = version;
 
@@ -169,6 +180,9 @@ export const logger = {
 
   /** Dispose the output channel and close the file stream. */
   dispose(): void {
+    _activeCommandLogStream?.end();
+    _activeCommandLogStream = undefined;
+    _activeCommandLogFile = undefined;
     _logStream?.end();
     _logStream = undefined;
     _channel?.dispose();
@@ -178,6 +192,67 @@ export const logger = {
   /** Get the underlying output channel (for context.subscriptions). */
   getOutputChannel(): vscode.OutputChannel {
     return getChannel();
+  },
+
+  /**
+   * Start a per-command log file. Creates a sequentially-numbered .log file
+   * in .vscode/code-explorer-logs/commands/ (e.g., 01-explore-symbol-readText.log).
+   * All subsequent logger.debug/info/warn/error calls will also be written to this file
+   * until endCommandLog() is called.
+   *
+   * @param commandLabel — short kebab-case label for the file name (e.g., "explore-symbol-readText")
+   */
+  startCommandLog(commandLabel: string): void {
+    if (!_commandLogDir) {
+      return;
+    }
+    // Close any previously active command log
+    _activeCommandLogStream?.end();
+    _activeCommandLogStream = undefined;
+    _activeCommandLogFile = undefined;
+
+    try {
+      fs.mkdirSync(_commandLogDir, { recursive: true });
+      _commandCallCounter++;
+      const seq = String(_commandCallCounter).padStart(2, '0');
+      const safeName = commandLabel.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileName = `${seq}-${safeName}.log`;
+      _activeCommandLogFile = path.join(_commandLogDir, fileName);
+
+      _activeCommandLogStream = fs.createWriteStream(_activeCommandLogFile, { flags: 'a' });
+
+      // Write header
+      const versionStr = _extensionVersion ? `  v${_extensionVersion}` : '';
+      _activeCommandLogStream.write(
+        `${'─'.repeat(72)}\n` +
+          `Command: ${commandLabel}\n` +
+          `Session: ${_sessionId}${versionStr}\n` +
+          `Started: ${new Date().toISOString()}\n` +
+          `${'─'.repeat(72)}\n`
+      );
+
+      emit(LogLevel.INFO, `Command log started: ${_activeCommandLogFile}`, []);
+    } catch {
+      _activeCommandLogStream = undefined;
+      _activeCommandLogFile = undefined;
+      emit(LogLevel.WARN, `Failed to start command log for "${commandLabel}"`, []);
+    }
+  },
+
+  /**
+   * End the active per-command log file. Closes the stream and resets state.
+   */
+  endCommandLog(): void {
+    if (_activeCommandLogStream) {
+      _activeCommandLogStream.write(
+        `${'─'.repeat(72)}\n` +
+          `Ended: ${new Date().toISOString()}\n` +
+          `${'─'.repeat(72)}\n`
+      );
+      _activeCommandLogStream.end();
+      _activeCommandLogStream = undefined;
+      _activeCommandLogFile = undefined;
+    }
   },
 
   debug(message: string, ...args: unknown[]): void {

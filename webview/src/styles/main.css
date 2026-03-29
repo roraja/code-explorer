@@ -337,6 +337,19 @@ body {
   opacity: 0.8;
 }
 
+a.symbol-header__breadcrumb {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: none;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+a.symbol-header__breadcrumb:hover {
+  text-decoration: underline;
+  color: var(--vscode-textLink-activeForeground, #3794ff);
+  opacity: 1;
+}
+
 .symbol-header__icon {
   font-size: 16px;
 }
@@ -489,6 +502,17 @@ details[open] > .section__title::before {
   margin-left: 6px;
 }
 
+a.callstack-item__file {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.callstack-item__file:hover {
+  text-decoration: underline;
+  color: var(--vscode-textLink-activeForeground, #3794ff);
+}
+
 .callstack-item__chain {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
@@ -511,6 +535,17 @@ details[open] > .section__title::before {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
   margin-left: 4px;
+}
+
+a.rel-file {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.rel-file:hover {
+  text-decoration: underline;
+  color: var(--vscode-textLink-activeForeground, #3794ff);
 }
 
 /* Metadata */
@@ -736,6 +771,18 @@ details[open] > .section__title::before {
   color: var(--vscode-descriptionForeground);
   margin-top: 3px;
   font-family: var(--vscode-editor-font-family);
+  display: block;
+}
+
+a.subfunction-item__file {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.subfunction-item__file:hover {
+  text-decoration: underline;
+  color: var(--vscode-textLink-activeForeground, #3794ff);
 }
 
 /* =====================
@@ -750,6 +797,21 @@ details[open] > .section__title::before {
 }
 
 .symbol-link:hover {
+  text-decoration: underline;
+  color: var(--vscode-textLink-activeForeground, #3794ff);
+}
+
+/* =====================
+   Clickable File References
+   ===================== */
+
+.file-link {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.file-link:hover {
   text-decoration: underline;
   color: var(--vscode-textLink-activeForeground, #3794ff);
 }
@@ -1057,4 +1119,15 @@ details[open] > .section__title::before {
   font-family: var(--vscode-editor-font-family);
   flex-shrink: 0;
   margin-left: auto;
+}
+
+a.data-flow-item__file {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.data-flow-item__file:hover {
+  text-decoration: underline;
+  color: var(--vscode-textLink-activeForeground, #3794ff);
 }

@@ -183,9 +183,9 @@ function renderAnalysis(tab: Tab): string {
   const a = tab.analysis;
   const sections: string[] = [];
 
-  // Header with file breadcrumb
+  // Header with file breadcrumb (clickable — navigates to the symbol's position)
   const fileBreadcrumb = tab.symbol.filePath
-    ? `<div class="symbol-header__breadcrumb" title="${esc(tab.symbol.filePath)}">${esc(shortPath(tab.symbol.filePath))}</div>`
+    ? `<a class="symbol-header__breadcrumb file-link" href="#" data-file="${esc(tab.symbol.filePath)}" data-line="${tab.symbol.kind !== 'unknown' && tab.analysis?.symbol?.position ? tab.analysis.symbol.position.line + 1 : 1}" data-char="0" title="${esc(tab.symbol.filePath)}">${esc(shortPath(tab.symbol.filePath))}</a>`
     : '';
   sections.push(`<div class="symbol-header">
     <div class="symbol-header__main">
@@ -273,7 +273,7 @@ function renderAnalysis(tab: Tab): string {
         <div class="subfunction-item__io">
           <span class="subfunction-item__label">Output:</span> <span>${esc(sf.output)}</span>
         </div>
-        ${sf.filePath ? `<div class="subfunction-item__file">${esc(shortPath(sf.filePath))}${sf.line ? ':' + sf.line : ''}</div>` : ''}
+        ${sf.filePath ? `<a class="subfunction-item__file file-link" href="#" data-file="${esc(sf.filePath)}" data-line="${sf.line || 1}" data-char="0">${esc(shortPath(sf.filePath))}${sf.line ? ':' + sf.line : ''}</a>` : ''}
       </div>`;
       })
       .join('');
@@ -439,10 +439,13 @@ function renderAnalysis(tab: Tab): string {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((df: any) => {
         const typeLabel = dataFlowIcon(df.type);
+        const fileRef = df.filePath
+          ? `<a class="data-flow-item__file file-link" href="#" data-file="${esc(df.filePath)}" data-line="${df.line || 1}" data-char="0">${esc(shortPath(df.filePath))}:${df.line}</a>`
+          : '';
         return `<div class="data-flow-item">
         <span class="data-flow-item__type">${typeLabel}</span>
         <span class="data-flow-item__desc">${esc(df.description)}</span>
-        ${df.filePath ? `<span class="data-flow-item__file">${esc(shortPath(df.filePath))}:${df.line}</span>` : ''}
+        ${fileRef}
       </div>`;
       })
       .join('');
@@ -488,7 +491,7 @@ function renderAnalysis(tab: Tab): string {
           : `<strong>${esc(c.caller.name)}</strong>`;
         return `<li class="callstack-item">
           ${nameHtml}
-          <span class="callstack-item__file">${esc(shortPath(c.caller.filePath))}:${c.caller.line}</span>
+          <a class="callstack-item__file file-link" href="#" data-file="${esc(c.caller.filePath)}" data-line="${c.caller.line || 1}" data-char="0">${esc(shortPath(c.caller.filePath))}:${c.caller.line}</a>
           <div class="callstack-item__chain">${esc(chain)}</div>
         </li>`;
       })
@@ -504,7 +507,7 @@ function renderAnalysis(tab: Tab): string {
       .map(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (r: any) =>
-          `<li><span class="rel-type">${esc(r.type)}</span> ${esc(r.targetName)} <span class="rel-file">${esc(shortPath(r.targetFilePath))}</span></li>`
+          `<li><span class="rel-type">${esc(r.type)}</span> ${esc(r.targetName)} <a class="rel-file file-link" href="#" data-file="${esc(r.targetFilePath)}" data-line="${r.targetLine || 1}" data-char="0">${esc(shortPath(r.targetFilePath))}</a></li>`
       )
       .join('');
     sections.push(renderSection('Relationships', `<ul class="list">${items}</ul>`));
@@ -584,6 +587,21 @@ function attachListeners(): void {
       const filePath = row.dataset.file;
       const line = parseInt(row.dataset.line || '0', 10);
       const character = parseInt(row.dataset.char || '0', 10);
+      if (filePath) {
+        vscode.postMessage({ type: 'navigateToSource', filePath, line, character });
+      }
+    });
+  });
+
+  // All file:line references rendered as <a class="file-link"> are clickable
+  document.querySelectorAll('.file-link').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const link = el as HTMLElement;
+      const filePath = link.dataset.file;
+      const line = parseInt(link.dataset.line || '1', 10);
+      const character = parseInt(link.dataset.char || '0', 10);
       if (filePath) {
         vscode.postMessage({ type: 'navigateToSource', filePath, line, character });
       }

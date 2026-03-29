@@ -516,41 +516,9 @@ export class ResponseParser {
     // Extract updated overview
     const updatedOverview = sections['updated overview'] || null;
 
-    // Extract additional key points from json:additional_key_points block
-    let additionalKeyPoints: string[] = [];
-    const kpMatch = raw.match(/```json:additional_key_points\s*\n([\s\S]*?)\n\s*```/);
-    if (kpMatch) {
-      try {
-        const parsed = JSON.parse(kpMatch[1]);
-        if (Array.isArray(parsed)) {
-          additionalKeyPoints = parsed.filter(
-            (s): s is string => typeof s === 'string' && s.length > 0
-          );
-        }
-      } catch (err) {
-        logger.warn(
-          `ResponseParser.parseEnhanceResponse: JSON parse error for additional_key_points: ${err}`
-        );
-      }
-    }
-
-    // Extract additional issues from json:additional_issues block
-    let additionalIssues: string[] = [];
-    const issueMatch = raw.match(/```json:additional_issues\s*\n([\s\S]*?)\n\s*```/);
-    if (issueMatch) {
-      try {
-        const parsed = JSON.parse(issueMatch[1]);
-        if (Array.isArray(parsed)) {
-          additionalIssues = parsed.filter(
-            (s): s is string => typeof s === 'string' && s.length > 0
-          );
-        }
-      } catch (err) {
-        logger.warn(
-          `ResponseParser.parseEnhanceResponse: JSON parse error for additional_issues: ${err}`
-        );
-      }
-    }
+    // Extract additional key points and issues using shared helper
+    const additionalKeyPoints = this._parseStringArrayBlock(raw, 'additional_key_points');
+    const additionalIssues = this._parseStringArrayBlock(raw, 'additional_issues');
 
     logger.info(
       `ResponseParser.parseEnhanceResponse: answer=${answer.length} chars, ` +
@@ -631,9 +599,35 @@ export class ResponseParser {
     const diagrams = this._parseDiagrams(raw);
     logger.info(`ResponseParser: parsed ${diagrams.length} diagrams`);
 
+    // Parse additional key points / issues from json:additional_key_points
+    // and json:additional_issues blocks. The LLM sometimes produces these
+    // in initial analysis responses even though the prompt only asks for
+    // them during enhance. Merge them into keyMethods / potentialIssues.
+    const additionalKeyPoints = this._parseStringArrayBlock(raw, 'additional_key_points');
+    const additionalIssues = this._parseStringArrayBlock(raw, 'additional_issues');
+    if (additionalKeyPoints.length > 0) {
+      logger.info(
+        `ResponseParser: parsed ${additionalKeyPoints.length} additional key points from json:additional_key_points`
+      );
+    }
+    if (additionalIssues.length > 0) {
+      logger.info(
+        `ResponseParser: parsed ${additionalIssues.length} additional issues from json:additional_issues`
+      );
+    }
+
+    const keyMethods = [
+      ...this._parseList(sections['key methods'] || sections['key points']),
+      ...additionalKeyPoints,
+    ];
+    const potentialIssues = [
+      ...this._parseList(sections['potential issues'] || sections['issues']),
+      ...additionalIssues,
+    ];
+
     return {
       overview: sections['overview'] || sections['purpose'] || sections['summary'] || '',
-      keyMethods: this._parseList(sections['key methods'] || sections['key points']),
+      keyMethods,
       callStacks,
       usages,
       dataFlow: dataFlow.length > 0 ? dataFlow : [],
@@ -646,7 +640,7 @@ export class ResponseParser {
       memberAccess: memberAccess.length > 0 ? memberAccess : undefined,
       dependencies: this._parseList(sections['dependencies']),
       usagePattern: sections['usage pattern'] || sections['usage'] || '',
-      potentialIssues: this._parseList(sections['potential issues'] || sections['issues']),
+      potentialIssues,
       variableLifecycle: variableLifecycle || undefined,
       dataKind: dataKind || undefined,
       diagrams: diagrams.length > 0 ? diagrams : undefined,
@@ -1128,6 +1122,8 @@ export class ResponseParser {
 
   /**
    * Extract markdown sections keyed by their heading text (lowercased).
+   * Strips ```json:* fenced blocks from section content since those are
+   * structured data parsed separately by dedicated methods.
    */
   private static _extractSections(markdown: string): Record<string, string> {
     const sections: Record<string, string> = {};
@@ -1138,16 +1134,55 @@ export class ResponseParser {
     let match;
     while ((match = regex.exec(markdown)) !== null) {
       if (lastKey !== null) {
-        sections[lastKey] = markdown.substring(lastIndex, match.index).trim();
+        sections[lastKey] = this._stripJsonFencedBlocks(
+          markdown.substring(lastIndex, match.index).trim()
+        );
       }
       lastKey = match[1].toLowerCase().trim();
       lastIndex = match.index + match[0].length;
     }
     if (lastKey !== null) {
-      sections[lastKey] = markdown.substring(lastIndex).trim();
+      sections[lastKey] = this._stripJsonFencedBlocks(
+        markdown.substring(lastIndex).trim()
+      );
     }
 
     return sections;
+  }
+
+  /**
+   * Remove ```json:* ... ``` fenced blocks from text.
+   * These blocks contain structured data that is parsed by dedicated methods
+   * and should not appear in prose section content (e.g. overview text).
+   */
+  private static _stripJsonFencedBlocks(text: string): string {
+    return text.replace(/```json:\S+\s*\n[\s\S]*?\n\s*```/g, '').trim();
+  }
+
+  /**
+   * Parse a ```json:<blockName> ... ``` fenced block containing a JSON
+   * string array. Returns an empty array if the block is missing, not
+   * valid JSON, or not an array of strings. Used for ad-hoc string-array
+   * blocks like `additional_key_points` and `additional_issues` that the
+   * LLM may produce even when not explicitly requested.
+   */
+  private static _parseStringArrayBlock(raw: string, blockName: string): string[] {
+    const regex = new RegExp('```json:' + blockName + '\\s*\\n([\\s\\S]*?)\\n\\s*```');
+    const match = raw.match(regex);
+    if (!match) {
+      return [];
+    }
+    try {
+      const parsed: unknown = JSON.parse(match[1]);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0);
+      }
+    } catch (err) {
+      logger.warn(
+        `ResponseParser._parseStringArrayBlock: JSON parse error for ${blockName}: ${err}`
+      );
+    }
+    return [];
   }
 
   /**

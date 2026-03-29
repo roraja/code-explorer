@@ -310,6 +310,22 @@ How this symbol is typically used in the codebase.
 #### 3p. Potential Issues
 Up to 3 code smells, bugs, or improvement suggestions.
 
+#### 3q. Mermaid Diagrams
+Generate 1-2 Mermaid diagrams that best visualize this symbol's behavior or structure. Choose the most appropriate diagram type:
+
+- For **functions/methods**: a flowchart showing the execution path, or a sequence diagram showing interactions with sub-functions.
+- For **classes/structs/interfaces**: a class diagram showing relationships (inheritance, composition, dependencies).
+- For **variables**: a flowchart showing the data flow lifecycle (creation → mutations → consumption).
+
+Use valid Mermaid syntax. Keep diagrams concise (under 20 nodes). Use short, readable labels. Do NOT use special characters or HTML in node labels.
+
+If no diagrams are applicable (e.g., simple variables or trivial symbols), skip this section.
+
+#### 3r. Related Symbol Analyses
+During analysis, you will read and understand other symbols — sub-functions called by the primary symbol, types used as parameters or return values, parent classes, interfaces implemented, etc. For each such related symbol, generate a **brief analysis entry** so it can be pre-cached.
+
+Include at minimum: sub-functions/methods called, custom types used as parameters/return values, parent/base classes, and interfaces implemented. Skip standard library types (string, number, Promise, Array, etc.).
+
 ### Step 4: Generate Cache Files
 
 For each analyzed symbol, write a markdown cache file with YAML frontmatter.
@@ -541,6 +557,24 @@ Returns: \\\`<typeName>\\\` — <description>
 }
 \\\`\\\`\\\`
 
+## Diagrams
+
+### <Diagram Title>
+
+\\\`\\\`\\\`mermaid
+<mermaid source>
+\\\`\\\`\\\`
+
+\\\`\\\`\\\`json:diagrams
+[
+  {
+    "title": "<diagram title>",
+    "type": "<flowchart|sequenceDiagram|classDiagram|stateDiagram>",
+    "mermaidSource": "<mermaid markup>"
+  }
+]
+\\\`\\\`\\\`
+
 ## Dependencies
 
 - <dependency 1>
@@ -554,6 +588,26 @@ Returns: \\\`<typeName>\\\` — <description>
 
 - <issue 1>
 - <issue 2>
+
+## Related Symbol Analyses
+
+\\\`\\\`\\\`json:related_symbol_analyses
+[
+  {
+    "cache_file_path": "<source_file_path>/<cache_key>.md",
+    "name": "relatedSymbolName",
+    "kind": "function",
+    "filePath": "src/path/to/source.ts",
+    "line": 25,
+    "container": null,
+    "scope_chain": [],
+    "overview": "2-3 sentence description of what this symbol does.",
+    "key_points": ["point 1", "point 2"],
+    "dependencies": ["dep1", "dep2"],
+    "potential_issues": ["issue 1"]
+  }
+]
+\\\`\\\`\\\`
 \`\`\`
 
 ### Section Inclusion Rules
@@ -574,11 +628,37 @@ Returns: \\\`<typeName>\\\` — <description>
 | Variable Lifecycle | — | — | ✓ | — | ✓ |
 | Data Flow | — | — | ✓ | — | ✓ |
 | Data Kind | — | — | ✓ | — | — |
+| Diagrams | ✓ | ✓ | ✓ | — | — |
+| Related Symbol Analyses | ✓ | ✓ | ✓ | ✓ | — |
 | Dependencies | ✓ | ✓ | ✓ | ✓ | — |
 | Usage Pattern | ✓ | ✓ | ✓ | ✓ | — |
 | Potential Issues | ✓ | ✓ | ✓ | ✓ | — |
 
 **Do NOT include empty sections.** If a section has no data, omit it entirely.
+
+### Clickable File:Line References
+
+Throughout the analysis (in callers, sub-functions, data flow, etc.), format file references as \\\`filePath:line\\\` using backtick-wrapped inline code. The Code Explorer webview auto-detects these patterns and makes them clickable — clicking navigates the user to that exact source location. Examples:
+- \\\`src/cache/CacheStore.ts:78\\\`
+- \\\`src/extension.ts:42\\\`
+
+Always use **relative paths** from the workspace root, and use **1-based line numbers** for the human-readable display (the JSON blocks use 0-based).
+
+### Related Symbol Cache File Naming
+
+When generating the \`json:related_symbol_analyses\` block, the \`cache_file_path\` field must follow the same cache key convention described in Step 4. Examples:
+- Sub-function \`runCLI\` in \`src/utils/cli.ts\` → \`"cache_file_path": "src/utils/cli.ts/fn.runCLI.md"\`
+- Type \`SymbolInfo\` in \`src/models/types.ts\` → \`"cache_file_path": "src/models/types.ts/interface.SymbolInfo.md"\`
+- Method \`parse\` in class \`ResponseParser\` → \`"cache_file_path": "src/llm/ResponseParser.ts/ResponseParser.method.parse.md"\`
+
+### Mermaid Diagram Guidelines
+
+- Use valid Mermaid syntax (flowchart TD, sequenceDiagram, classDiagram, stateDiagram, etc.)
+- Keep diagrams concise — under 20 nodes
+- Use short, readable labels — no special characters or HTML in node labels
+- The Diagrams section must include **both** a human-readable \`\\\`\\\`\\\`mermaid\` fenced block AND the machine-readable \`\\\`\\\`\\\`json:diagrams\` block
+- The \`mermaidSource\` field in the JSON must contain the raw mermaid markup (same as inside the mermaid fence)
+- The webview renders these as interactive SVG diagrams
 
 ### Step 6: Verify and Report
 
@@ -590,15 +670,18 @@ After writing all cache files, report:
 ## Important Rules
 
 1. **YAML frontmatter is mandatory** — every cache file must start with \`---\\n\` frontmatter block
-2. **Use 0-based line numbers** — matching VS Code's internal line numbering
-3. **scope_chain must be quoted** — e.g., \`scope_chain: "ClassName.methodName"\`
-4. **analyzed_at must be quoted ISO 8601** — e.g., \`analyzed_at: "2024-03-29T12:00:00.000Z"\`
-5. **JSON blocks use tagged fences** — e.g., \`\\\`\\\`\\\`json:callers\` not plain \`\\\`\\\`\\\`json\`
-6. **llm_provider value**: use \`claude\` when running in Claude Code, \`copilot-cli\` when in Copilot
-7. **Be accurate** — only state facts derivable from the source code. Do not hallucinate callers or dependencies.
-8. **Sanitize names** — replace characters invalid in file paths
-9. **Create directories** — ensure the cache directory structure exists before writing
-10. **Never overwrite existing non-stale cache files** — check if a cache file already exists and is not stale before writing. If it exists and is fresh, skip it.
+2. **Use 0-based line numbers** in YAML frontmatter and JSON blocks — matching VS Code's internal line numbering
+3. **Use 1-based line numbers** in human-readable markdown text (e.g., \\\`src/file.ts:42\\\`) — matching what users see in VS Code
+4. **scope_chain must be quoted** — e.g., \`scope_chain: "ClassName.methodName"\`
+5. **analyzed_at must be quoted ISO 8601** — e.g., \`analyzed_at: "2024-03-29T12:00:00.000Z"\`
+6. **JSON blocks use tagged fences** — e.g., \`\\\`\\\`\\\`json:callers\` not plain \`\\\`\\\`\\\`json\`
+7. **Mermaid blocks use \`\\\`\\\`\\\`mermaid\` fences** — the webview renders them as interactive SVG diagrams
+8. **llm_provider value**: use \`claude\` when running in Claude Code, \`copilot-cli\` when in Copilot
+9. **Be accurate** — only state facts derivable from the source code. Do not hallucinate callers or dependencies.
+10. **Sanitize names** — replace characters invalid in file paths
+11. **Create directories** — ensure the cache directory structure exists before writing
+12. **Never overwrite existing non-stale cache files** — check if a cache file already exists and is not stale before writing. If it exists and is fresh, skip it.
+13. **Format file references as clickable links** — use \\\`filePath:line\\\` format throughout the analysis text so the webview can make them clickable
 
 ## Example Invocations
 

@@ -173,6 +173,75 @@ Some text.
       assert.strictEqual(result.callStacks![0].caller.name, 'main');
       assert.strictEqual(result.usages!.length, 1);
     });
+
+    test('strips json fenced blocks from overview text', () => {
+      const raw = `### Overview
+This is the overview.
+
+\`\`\`json:additional_key_points
+["Key point 1", "Key point 2"]
+\`\`\`
+
+\`\`\`json:additional_issues
+["Issue 1"]
+\`\`\`
+
+### Key Points
+- Point one
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.strictEqual(result.overview, 'This is the overview.');
+      // The additional_key_points should be merged into keyMethods
+      assert.ok(result.keyMethods);
+      assert.ok(result.keyMethods!.includes('Key point 1'));
+      assert.ok(result.keyMethods!.includes('Key point 2'));
+      // The additional_issues should be merged into potentialIssues
+      assert.ok(result.potentialIssues);
+      assert.ok(result.potentialIssues!.includes('Issue 1'));
+    });
+
+    test('parses additional_key_points and additional_issues from initial analysis', () => {
+      const raw = `### Overview
+A class that does things.
+
+### Key Points
+- Existing point
+
+### Potential Issues
+- Existing issue
+
+\`\`\`json:additional_key_points
+["Extra key point A", "Extra key point B"]
+\`\`\`
+
+\`\`\`json:additional_issues
+["Extra issue X"]
+\`\`\`
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      // keyMethods should include both section items and additional_key_points
+      assert.ok(result.keyMethods);
+      assert.ok(result.keyMethods!.includes('Existing point'));
+      assert.ok(result.keyMethods!.includes('Extra key point A'));
+      assert.ok(result.keyMethods!.includes('Extra key point B'));
+      // potentialIssues should include both section items and additional_issues
+      assert.ok(result.potentialIssues);
+      assert.ok(result.potentialIssues!.includes('Existing issue'));
+      assert.ok(result.potentialIssues!.includes('Extra issue X'));
+    });
+
+    test('handles missing additional_key_points and additional_issues gracefully', () => {
+      const raw = `### Overview
+Simple overview.
+
+### Key Points
+- Only point
+`;
+      const result = ResponseParser.parse(raw, testSymbol);
+      assert.ok(result.keyMethods);
+      assert.strictEqual(result.keyMethods!.length, 1);
+      assert.strictEqual(result.keyMethods![0], 'Only point');
+    });
   });
 
   suite('parse — function inputs', () => {

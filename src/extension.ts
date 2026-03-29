@@ -46,7 +46,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- Analysis Layer ---
   const staticAnalyzer = new StaticAnalyzer();
   const cacheStore = new CacheStore(workspaceRoot);
-  const orchestrator = new AnalysisOrchestrator(staticAnalyzer, llmProvider, cacheStore, workspaceRoot);
+  const orchestrator = new AnalysisOrchestrator(
+    staticAnalyzer,
+    llmProvider,
+    cacheStore,
+    workspaceRoot
+  );
 
   context.subscriptions.push({ dispose: () => orchestrator.dispose() });
 
@@ -112,8 +117,10 @@ export function activate(context: vscode.ExtensionContext): void {
       const startLine = Math.max(0, position.line - 50);
       const endLine = Math.min(editor.document.lineCount - 1, position.line + 50);
       const surroundingRange = new vscode.Range(
-        startLine, 0,
-        endLine, editor.document.lineAt(endLine).text.length
+        startLine,
+        0,
+        endLine,
+        editor.document.lineAt(endLine).text.length
       );
       const surroundingSource = editor.document.getText(surroundingRange);
       const cursorLine = editor.document.lineAt(position.line).text;
@@ -172,9 +179,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
         logger.warn('exploreFileSymbols: no active editor');
-        vscode.window.showWarningMessage(
-          'No active editor. Open a file to explore its symbols.'
-        );
+        vscode.window.showWarningMessage('No active editor. Open a file to explore its symbols.');
         return;
       }
 

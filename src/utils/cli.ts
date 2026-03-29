@@ -37,7 +37,17 @@ export interface CLIRunOptions {
  * - Uses a `settled` guard to prevent double-resolve/reject.
  */
 export function runCLI(options: CLIRunOptions): Promise<string> {
-  const { command, args, stdinData, timeoutMs = 900_000, envOverrides, cwd, label, onStdoutChunk, onStderrChunk } = options;
+  const {
+    command,
+    args,
+    stdinData,
+    timeoutMs = 900_000,
+    envOverrides,
+    cwd,
+    label,
+    onStdoutChunk,
+    onStderrChunk,
+  } = options;
 
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
@@ -69,7 +79,9 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
     const waitingInterval = setInterval(() => {
       if (!settled) {
         const elapsedSec = Math.round((Date.now() - startTime) / 1000);
-        logger.info(`${label}: Still waiting for agent to complete (PID=${pid}, ${elapsedSec}s elapsed)`);
+        logger.info(
+          `${label}: Still waiting for agent to complete (PID=${pid}, ${elapsedSec}s elapsed)`
+        );
       }
     }, 15_000);
 

@@ -13,11 +13,21 @@
  *   identify the symbol kind and perform analysis in one call (fast path)
  */
 import * as vscode from 'vscode';
-import type { AnalysisResult, AnalysisProgressCallback, SymbolInfo, CursorContext, RelatedSymbolAnalysis } from '../models/types';
+import type {
+  AnalysisResult,
+  AnalysisProgressCallback,
+  SymbolInfo,
+  CursorContext,
+  RelatedSymbolAnalysis,
+} from '../models/types';
 import type { LLMProvider } from '../llm/LLMProvider';
 import type { CacheStore } from '../cache/CacheStore';
 import { PromptBuilder } from '../llm/PromptBuilder';
-import { ResponseParser, ResolvedSymbolIdentity, RelatedSymbolCacheEntry } from '../llm/ResponseParser';
+import {
+  ResponseParser,
+  ResolvedSymbolIdentity,
+  RelatedSymbolCacheEntry,
+} from '../llm/ResponseParser';
 import { StaticAnalyzer } from './StaticAnalyzer';
 import { ANALYSIS_VERSION, STATIC_ANALYSIS_TIMEOUT_MS } from '../models/constants';
 import { logger } from '../utils/logger';
@@ -32,8 +42,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T, label: str
       resolve(fallback);
     }, ms);
     promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (err) => { clearTimeout(timer); logger.warn(`${label} failed: ${err}`); resolve(fallback); }
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        logger.warn(`${label} failed: ${err}`);
+        resolve(fallback);
+      }
     );
   });
 }
@@ -109,7 +126,9 @@ export class AnalysisOrchestrator {
                 `Analyzed at: ${cached.metadata.analyzedAt}. ` +
                 `Will analyze with LLM.`
             );
-            logger.info(`Orchestrator: CACHE MISS (no LLM data) for "${symbol.name}", will analyze`);
+            logger.info(
+              `Orchestrator: CACHE MISS (no LLM data) for "${symbol.name}", will analyze`
+            );
           }
         } else {
           logger.logLLMStep(
@@ -153,7 +172,9 @@ export class AnalysisOrchestrator {
         '',
         'readContainingScopeSource'
       );
-      logger.logLLMStep(`Containing scope source: ${containingScopeSource ? containingScopeSource.length : 0} chars`);
+      logger.logLLMStep(
+        `Containing scope source: ${containingScopeSource ? containingScopeSource.length : 0} chars`
+      );
     }
 
     // 3. LLM analysis
@@ -169,7 +190,9 @@ export class AnalysisOrchestrator {
         logger.info(`Orchestrator: running LLM analysis with ${this._llmProvider.name}`);
 
         const prompt = PromptBuilder.build(symbol, sourceCode, containingScopeSource);
-        logger.logLLMStep(`Prompt built (${prompt.length} chars), sending to ${this._llmProvider.name}...`);
+        logger.logLLMStep(
+          `Prompt built (${prompt.length} chars), sending to ${this._llmProvider.name}...`
+        );
 
         // Log the prompt before sending
         logger.logLLMInput(prompt);
@@ -209,7 +232,9 @@ export class AnalysisOrchestrator {
         // Log the full response
         logger.logLLMOutput(rawResponse);
       } else if (!available) {
-        logger.logLLMStep(`LLM provider "${this._llmProvider.name}" not available — no analysis possible`);
+        logger.logLLMStep(
+          `LLM provider "${this._llmProvider.name}" not available — no analysis possible`
+        );
         logger.warn(`Orchestrator: LLM provider "${this._llmProvider.name}" not available`);
       } else {
         logger.logLLMStep('No source code available — cannot run LLM analysis');
@@ -224,8 +249,7 @@ export class AnalysisOrchestrator {
     logger.logLLMStep('Building analysis result...');
     const result: AnalysisResult = {
       symbol,
-      overview:
-        llmResult.overview || `${symbol.kind} **${symbol.name}** in \`${symbol.filePath}\``,
+      overview: llmResult.overview || `${symbol.kind} **${symbol.name}** in \`${symbol.filePath}\``,
       callStacks: llmResult.callStacks || [],
       usages: llmResult.usages || [],
       dataFlow: llmResult.dataFlow || [],
@@ -324,11 +348,7 @@ export class AnalysisOrchestrator {
         cached = await this._cache.findByCursorWithLLMFallback(cursor, this._workspaceRoot);
       } else {
         // No workspace root available — use basic findByCursor only
-        cached = await this._cache.findByCursor(
-          cursor.word,
-          cursor.filePath,
-          cursor.position.line
-        );
+        cached = await this._cache.findByCursor(cursor.word, cursor.filePath, cursor.position.line);
       }
 
       if (cached && !cached.result.metadata.stale && cached.result.metadata.llmProvider) {
@@ -375,7 +395,9 @@ export class AnalysisOrchestrator {
     logger.logLLMStep('Building unified prompt (symbol identification + full analysis)...');
 
     const prompt = PromptBuilder.buildUnified(cursor, this._cache.cacheRoot);
-    logger.logLLMStep(`Unified prompt built (${prompt.length} chars), sending to ${this._llmProvider.name}...`);
+    logger.logLLMStep(
+      `Unified prompt built (${prompt.length} chars), sending to ${this._llmProvider.name}...`
+    );
     logger.logLLMInput(prompt);
 
     // 3. Send to LLM
@@ -395,7 +417,9 @@ export class AnalysisOrchestrator {
       const available = await this._llmProvider.isAvailable();
 
       if (available) {
-        logger.logLLMStep(`LLM provider available — sending unified prompt to ${this._llmProvider.name}...`);
+        logger.logLLMStep(
+          `LLM provider available — sending unified prompt to ${this._llmProvider.name}...`
+        );
         logger.info(`Orchestrator: running unified LLM analysis with ${this._llmProvider.name}`);
 
         // Start real-time output section
@@ -411,7 +435,9 @@ export class AnalysisOrchestrator {
         // Close the real-time output code fence
         logger.logLLMChunk('\n```\n\n');
 
-        logger.logLLMStep(`Response received (${rawResponse.length} chars), parsing symbol identity...`);
+        logger.logLLMStep(
+          `Response received (${rawResponse.length} chars), parsing symbol identity...`
+        );
         logger.logLLMOutput(rawResponse);
 
         // 3a. Parse symbol identity from the response
@@ -445,7 +471,9 @@ export class AnalysisOrchestrator {
             `issues: ${llmResult.potentialIssues?.length || 0}`
         );
       } else {
-        logger.logLLMStep(`LLM provider "${this._llmProvider.name}" not available — cannot resolve or analyze`);
+        logger.logLLMStep(
+          `LLM provider "${this._llmProvider.name}" not available — cannot resolve or analyze`
+        );
         logger.warn(`Orchestrator: LLM provider "${this._llmProvider.name}" not available`);
       }
     } catch (err) {
@@ -468,7 +496,8 @@ export class AnalysisOrchestrator {
     const result: AnalysisResult = {
       symbol: resolvedSymbol,
       overview:
-        llmResult.overview || `${resolvedSymbol.kind} **${resolvedSymbol.name}** in \`${resolvedSymbol.filePath}\``,
+        llmResult.overview ||
+        `${resolvedSymbol.kind} **${resolvedSymbol.name}** in \`${resolvedSymbol.filePath}\``,
       callStacks: llmResult.callStacks || [],
       usages: llmResult.usages || [],
       dataFlow: llmResult.dataFlow || [],
@@ -503,7 +532,9 @@ export class AnalysisOrchestrator {
 
       // Pre-cache related symbols from json:related_symbols (legacy format)
       if (result.relatedSymbols && result.relatedSymbols.length > 0) {
-        logger.logLLMStep(`Pre-caching ${result.relatedSymbols.length} related symbols (legacy)...`);
+        logger.logLLMStep(
+          `Pre-caching ${result.relatedSymbols.length} related symbols (legacy)...`
+        );
         await this._cacheRelatedSymbols(result.relatedSymbols, llmProviderName);
       }
 
@@ -512,7 +543,9 @@ export class AnalysisOrchestrator {
       if (rawResponse) {
         const relatedCacheEntries = ResponseParser.parseRelatedSymbolCacheEntries(rawResponse);
         if (relatedCacheEntries.length > 0) {
-          logger.logLLMStep(`Pre-caching ${relatedCacheEntries.length} related symbol analyses (with cache paths)...`);
+          logger.logLLMStep(
+            `Pre-caching ${relatedCacheEntries.length} related symbol analyses (with cache paths)...`
+          );
           await this._cacheRelatedSymbolAnalyses(relatedCacheEntries, llmProviderName);
         }
       }
@@ -556,9 +589,7 @@ export class AnalysisOrchestrator {
       try {
         const existing = await this._cache.read(relatedSymbolInfo);
         if (existing && !existing.metadata.stale) {
-          logger.debug(
-            `Orchestrator: skipping pre-cache for "${related.name}" — already cached`
-          );
+          logger.debug(`Orchestrator: skipping pre-cache for "${related.name}" — already cached`);
           continue;
         }
       } catch {
@@ -587,7 +618,9 @@ export class AnalysisOrchestrator {
 
       try {
         await this._cache.write(relatedResult);
-        logger.info(`Orchestrator: pre-cached related symbol "${related.name}" in ${related.filePath}`);
+        logger.info(
+          `Orchestrator: pre-cached related symbol "${related.name}" in ${related.filePath}`
+        );
       } catch (err) {
         logger.debug(`Orchestrator: failed to pre-cache "${related.name}": ${err}`);
       }
@@ -652,7 +685,9 @@ export class AnalysisOrchestrator {
 
       try {
         await this._cache.write(result);
-        logger.info(`Orchestrator: pre-cached related "${entry.name}" (${entry.kind}) in ${entry.filePath}`);
+        logger.info(
+          `Orchestrator: pre-cached related "${entry.name}" (${entry.kind}) in ${entry.filePath}`
+        );
       } catch (err) {
         logger.debug(`Orchestrator: failed to pre-cache related "${entry.name}": ${err}`);
       }
@@ -690,8 +725,12 @@ export class AnalysisOrchestrator {
     logger.logLLMStep(`Checking if LLM provider "${this._llmProvider.name}" is available...`);
     const available = await this._llmProvider.isAvailable();
     if (!available) {
-      logger.logLLMStep(`LLM provider "${this._llmProvider.name}" not available — cannot analyze file`);
-      logger.warn(`Orchestrator.analyzeFile: LLM provider "${this._llmProvider.name}" not available`);
+      logger.logLLMStep(
+        `LLM provider "${this._llmProvider.name}" not available — cannot analyze file`
+      );
+      logger.warn(
+        `Orchestrator.analyzeFile: LLM provider "${this._llmProvider.name}" not available`
+      );
       return 0;
     }
 
@@ -754,9 +793,7 @@ export class AnalysisOrchestrator {
       try {
         const existing = await this._cache.read(symbolInfo);
         if (existing && !existing.metadata.stale && existing.metadata.llmProvider) {
-          logger.debug(
-            `Orchestrator.analyzeFile: skipping "${entry.name}" — already cached`
-          );
+          logger.debug(`Orchestrator.analyzeFile: skipping "${entry.name}" — already cached`);
           continue;
         }
       } catch {

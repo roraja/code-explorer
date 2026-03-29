@@ -10,9 +10,10 @@ import type { PromptStrategy, PromptContext } from './PromptStrategy';
 
 export class FunctionPromptStrategy implements PromptStrategy {
   buildPrompt(symbol: SymbolInfo, context: PromptContext, lang: string): string {
-    const scopeCtx = symbol.scopeChain && symbol.scopeChain.length > 0
-      ? `\nScope chain: ${symbol.scopeChain.join(' → ')} → ${symbol.name}`
-      : '';
+    const scopeCtx =
+      symbol.scopeChain && symbol.scopeChain.length > 0
+        ? `\nScope chain: ${symbol.scopeChain.join(' → ')} → ${symbol.name}`
+        : '';
 
     return `Analyze the following ${symbol.kind} "${symbol.name}" from file "${symbol.filePath}".${scopeCtx}
 

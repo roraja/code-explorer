@@ -85,7 +85,11 @@ suite('PromptBuilder', () => {
         position: { line: 5, character: 0 },
         scopeChain: ['calculate'],
       };
-      const prompt = PromptBuilder.build(symbol, 'const result = 0;', 'function calculate() { const result = 0; return result; }');
+      const prompt = PromptBuilder.build(
+        symbol,
+        'const result = 0;',
+        'function calculate() { const result = 0; return result; }'
+      );
       assert.ok(prompt.includes('Containing Scope'));
       assert.ok(prompt.includes('function calculate'));
     });

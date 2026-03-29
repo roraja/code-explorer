@@ -7,7 +7,12 @@
  * The webview is a pure renderer — it never owns state.
  */
 import * as vscode from 'vscode';
-import type { SymbolInfo, CursorContext, TabState, WebviewToExtensionMessage } from '../models/types';
+import type {
+  SymbolInfo,
+  CursorContext,
+  TabState,
+  WebviewToExtensionMessage,
+} from '../models/types';
 import type { AnalysisOrchestrator } from '../analysis/AnalysisOrchestrator';
 import { logger } from '../utils/logger';
 
@@ -162,7 +167,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
    * then updated with the resolved kind once the LLM responds.
    */
   public async openTabFromCursor(cursor: CursorContext): Promise<void> {
-    logger.info(`ViewProvider.openTabFromCursor: "${cursor.word}" in ${cursor.filePath}:${cursor.position.line}`);
+    logger.info(
+      `ViewProvider.openTabFromCursor: "${cursor.word}" in ${cursor.filePath}:${cursor.position.line}`
+    );
 
     // Create a temporary tab while the LLM resolves and analyzes
     const tabId = `tab-${++this._tabCounter}`;
@@ -184,7 +191,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
     this._tabs.push(tab);
     this._activeTabId = tabId;
     this._pushState();
-    logger.info(`ViewProvider.openTabFromCursor: created tab ${tabId}, triggering unified analysis`);
+    logger.info(
+      `ViewProvider.openTabFromCursor: created tab ${tabId}, triggering unified analysis`
+    );
 
     if (!this._orchestrator) {
       logger.warn('ViewProvider.openTabFromCursor: no orchestrator');
@@ -226,7 +235,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         t.error = message;
       }
       this._pushState();
-      logger.error(`ViewProvider.openTabFromCursor: analysis failed for "${cursor.word}": ${message}`);
+      logger.error(
+        `ViewProvider.openTabFromCursor: analysis failed for "${cursor.word}": ${message}`
+      );
     }
   }
 
@@ -309,7 +320,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       }
 
       case 'exploreSymbol': {
-        logger.info(`ViewProvider: exploreSymbol "${message.symbolName}" in ${message.filePath || 'unknown'}`);
+        logger.info(
+          `ViewProvider: exploreSymbol "${message.symbolName}" in ${message.filePath || 'unknown'}`
+        );
         this._exploreSymbolByName(message.symbolName, message.filePath, message.line, message.kind);
         break;
       }
@@ -389,7 +402,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
           };
           this.openTab(symbolInfo);
         } else {
-          logger.warn(`ViewProvider._exploreSymbolByName: symbol "${symbolName}" not found in workspace`);
+          logger.warn(
+            `ViewProvider._exploreSymbolByName: symbol "${symbolName}" not found in workspace`
+          );
         }
       }
     } catch (err) {

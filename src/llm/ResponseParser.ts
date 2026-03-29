@@ -4,7 +4,23 @@
  * Parses LLM markdown responses into structured AnalysisResult fields.
  * Handles inconsistent formatting gracefully.
  */
-import type { AnalysisResult, SymbolInfo, SymbolKindType, CallStackEntry, UsageEntry, RelatedSymbolAnalysis, FunctionStep, SubFunctionInfo, FunctionInputParam, FunctionOutputInfo, DataFlowEntry, DataKindInfo, VariableLifecycle, ClassMemberInfo, MemberAccessInfo } from '../models/types';
+import type {
+  AnalysisResult,
+  SymbolInfo,
+  SymbolKindType,
+  CallStackEntry,
+  UsageEntry,
+  RelatedSymbolAnalysis,
+  FunctionStep,
+  SubFunctionInfo,
+  FunctionInputParam,
+  FunctionOutputInfo,
+  DataFlowEntry,
+  DataKindInfo,
+  VariableLifecycle,
+  ClassMemberInfo,
+  MemberAccessInfo,
+} from '../models/types';
 import { logger } from '../utils/logger';
 
 /** Shape of a single caller entry in the LLM's json:callers block. */
@@ -108,8 +124,17 @@ export interface FileSymbolAnalysisEntry {
 export class ResponseParser {
   /** Valid symbol kinds that the LLM can return. */
   private static readonly _validKinds = new Set<string>([
-    'function', 'method', 'class', 'struct', 'variable', 'interface',
-    'type', 'enum', 'property', 'parameter', 'unknown',
+    'function',
+    'method',
+    'class',
+    'struct',
+    'variable',
+    'interface',
+    'type',
+    'enum',
+    'property',
+    'parameter',
+    'unknown',
   ]);
 
   /**
@@ -135,20 +160,19 @@ export class ResponseParser {
       }
       const e = entry as Record<string, unknown>;
 
-      const name = typeof e['name'] === 'string' && e['name'].length > 0
-        ? e['name']
-        : fallbackName;
+      const name = typeof e['name'] === 'string' && e['name'].length > 0 ? e['name'] : fallbackName;
 
       const rawKind = typeof e['kind'] === 'string' ? e['kind'].toLowerCase() : 'unknown';
       const kind = (this._validKinds.has(rawKind) ? rawKind : 'unknown') as SymbolKindType;
 
-      const container = typeof e['container'] === 'string' && e['container'].length > 0
-        ? e['container']
-        : null;
+      const container =
+        typeof e['container'] === 'string' && e['container'].length > 0 ? e['container'] : null;
 
       const scopeChain = Array.isArray(e['scope_chain'])
         ? e['scope_chain'].filter((s): s is string => typeof s === 'string')
-        : (container ? [container] : []);
+        : container
+          ? [container]
+          : [];
 
       logger.info(
         `ResponseParser.parseSymbolIdentity: resolved "${name}" as ${kind}` +
@@ -172,14 +196,18 @@ export class ResponseParser {
   static parseRelatedSymbolCacheEntries(raw: string): RelatedSymbolCacheEntry[] {
     const match = raw.match(/```json:related_symbol_analyses\s*\n([\s\S]*?)\n\s*```/);
     if (!match) {
-      logger.debug('ResponseParser.parseRelatedSymbolCacheEntries: no json:related_symbol_analyses block found');
+      logger.debug(
+        'ResponseParser.parseRelatedSymbolCacheEntries: no json:related_symbol_analyses block found'
+      );
       return [];
     }
 
     try {
       const entries: unknown[] = JSON.parse(match[1]);
       if (!Array.isArray(entries)) {
-        logger.warn('ResponseParser.parseRelatedSymbolCacheEntries: json:related_symbol_analyses is not an array');
+        logger.warn(
+          'ResponseParser.parseRelatedSymbolCacheEntries: json:related_symbol_analyses is not an array'
+        );
         return [];
       }
 
@@ -202,18 +230,23 @@ export class ResponseParser {
           kind,
           filePath: String(e['filePath']),
           line: typeof e['line'] === 'number' ? e['line'] : 0,
-          container: typeof e['container'] === 'string' && e['container'].length > 0 ? e['container'] : null,
+          container:
+            typeof e['container'] === 'string' && e['container'].length > 0 ? e['container'] : null,
           scopeChain: Array.isArray(e['scope_chain'])
             ? e['scope_chain'].filter((s): s is string => typeof s === 'string')
             : [],
           overview: String(e['overview']),
           keyPoints: Array.isArray(e['key_points']) ? e['key_points'].map(String) : [],
           dependencies: Array.isArray(e['dependencies']) ? e['dependencies'].map(String) : [],
-          potentialIssues: Array.isArray(e['potential_issues']) ? e['potential_issues'].map(String) : [],
+          potentialIssues: Array.isArray(e['potential_issues'])
+            ? e['potential_issues'].map(String)
+            : [],
         });
       }
 
-      logger.info(`ResponseParser.parseRelatedSymbolCacheEntries: parsed ${results.length} related symbol cache entries`);
+      logger.info(
+        `ResponseParser.parseRelatedSymbolCacheEntries: parsed ${results.length} related symbol cache entries`
+      );
       return results;
     } catch (err) {
       logger.warn(`ResponseParser.parseRelatedSymbolCacheEntries: JSON parse error: ${err}`);
@@ -231,14 +264,18 @@ export class ResponseParser {
   static parseFileSymbolAnalyses(raw: string): FileSymbolAnalysisEntry[] {
     const match = raw.match(/```json:file_symbol_analyses\s*\n([\s\S]*?)\n\s*```/);
     if (!match) {
-      logger.warn('ResponseParser.parseFileSymbolAnalyses: no json:file_symbol_analyses block found');
+      logger.warn(
+        'ResponseParser.parseFileSymbolAnalyses: no json:file_symbol_analyses block found'
+      );
       return [];
     }
 
     try {
       const entries: unknown[] = JSON.parse(match[1]);
       if (!Array.isArray(entries)) {
-        logger.warn('ResponseParser.parseFileSymbolAnalyses: json:file_symbol_analyses is not an array');
+        logger.warn(
+          'ResponseParser.parseFileSymbolAnalyses: json:file_symbol_analyses is not an array'
+        );
         return [];
       }
 
@@ -271,13 +308,17 @@ export class ResponseParser {
                     filePath: String(ce['filePath']),
                     line: typeof ce['line'] === 'number' ? ce['line'] : 0,
                     kind: (typeof ce['kind'] === 'string' && this._validKinds.has(ce['kind'])
-                      ? ce['kind'] : 'function') as SymbolKindType,
+                      ? ce['kind']
+                      : 'function') as SymbolKindType,
                   },
-                  callSites: [{ line: typeof ce['line'] === 'number' ? ce['line'] : 0, character: 0 }],
+                  callSites: [
+                    { line: typeof ce['line'] === 'number' ? ce['line'] : 0, character: 0 },
+                  ],
                   depth: 0,
-                  chain: typeof ce['context'] === 'string'
-                    ? ce['context']
-                    : `${ce['name']} → calls this symbol`,
+                  chain:
+                    typeof ce['context'] === 'string'
+                      ? ce['context']
+                      : `${ce['name']} → calls this symbol`,
                 });
               }
             }
@@ -317,7 +358,8 @@ export class ResponseParser {
                   typeName: String(f['typeName']),
                   description: typeof f['description'] === 'string' ? f['description'] : '',
                   mutated: f['mutated'] === true,
-                  mutationDetail: typeof f['mutationDetail'] === 'string' ? f['mutationDetail'] : undefined,
+                  mutationDetail:
+                    typeof f['mutationDetail'] === 'string' ? f['mutationDetail'] : undefined,
                 });
               }
             }
@@ -342,7 +384,14 @@ export class ResponseParser {
 
         // Parse class members
         const classMembers: ClassMemberInfo[] = [];
-        const validMemberKinds = new Set(['field', 'method', 'property', 'constructor', 'getter', 'setter']);
+        const validMemberKinds = new Set([
+          'field',
+          'method',
+          'property',
+          'constructor',
+          'getter',
+          'setter',
+        ]);
         const validVisibility = new Set(['public', 'private', 'protected', 'internal']);
         if (Array.isArray(e['class_members'])) {
           for (const cm of e['class_members']) {
@@ -352,10 +401,12 @@ export class ResponseParser {
                 classMembers.push({
                   name: String(m['name']),
                   memberKind: (validMemberKinds.has(m['memberKind'] as string)
-                    ? m['memberKind'] : 'field') as ClassMemberInfo['memberKind'],
+                    ? m['memberKind']
+                    : 'field') as ClassMemberInfo['memberKind'],
                   typeName: typeof m['typeName'] === 'string' ? m['typeName'] : 'unknown',
                   visibility: (validVisibility.has(m['visibility'] as string)
-                    ? m['visibility'] : 'public') as ClassMemberInfo['visibility'],
+                    ? m['visibility']
+                    : 'public') as ClassMemberInfo['visibility'],
                   isStatic: m['isStatic'] === true,
                   description: typeof m['description'] === 'string' ? m['description'] : '',
                   line: typeof m['line'] === 'number' ? m['line'] : undefined,
@@ -384,7 +435,8 @@ export class ResponseParser {
           kind,
           filePath: String(e['filePath']),
           line: typeof e['line'] === 'number' ? e['line'] : 0,
-          container: typeof e['container'] === 'string' && e['container'].length > 0 ? e['container'] : null,
+          container:
+            typeof e['container'] === 'string' && e['container'].length > 0 ? e['container'] : null,
           scopeChain: Array.isArray(e['scope_chain'])
             ? e['scope_chain'].filter((s): s is string => typeof s === 'string')
             : [],
@@ -398,11 +450,15 @@ export class ResponseParser {
           callers,
           dependencies: Array.isArray(e['dependencies']) ? e['dependencies'].map(String) : [],
           usagePattern: typeof e['usage_pattern'] === 'string' ? e['usage_pattern'] : '',
-          potentialIssues: Array.isArray(e['potential_issues']) ? e['potential_issues'].map(String) : [],
+          potentialIssues: Array.isArray(e['potential_issues'])
+            ? e['potential_issues'].map(String)
+            : [],
         });
       }
 
-      logger.info(`ResponseParser.parseFileSymbolAnalyses: parsed ${results.length} file symbol analyses`);
+      logger.info(
+        `ResponseParser.parseFileSymbolAnalyses: parsed ${results.length} file symbol analyses`
+      );
       return results;
     } catch (err) {
       logger.warn(`ResponseParser.parseFileSymbolAnalyses: JSON parse error: ${err}`);
@@ -446,7 +502,9 @@ export class ResponseParser {
 
     // Parse function output from json:function_output block
     const functionOutput = this._parseFunctionOutput(raw);
-    logger.info(`ResponseParser: parsed function output: ${functionOutput ? functionOutput.typeName : 'none'}`);
+    logger.info(
+      `ResponseParser: parsed function output: ${functionOutput ? functionOutput.typeName : 'none'}`
+    );
 
     // Parse data flow from json:data_flow block
     const dataFlow = this._parseDataFlow(raw);
@@ -493,9 +551,10 @@ export class ResponseParser {
    * Extract the ```json:callers ... ``` fenced block and parse into
    * CallStackEntry[] and UsageEntry[].
    */
-  private static _parseCallers(
-    raw: string
-  ): { callStacks: CallStackEntry[]; usages: UsageEntry[] } {
+  private static _parseCallers(raw: string): {
+    callStacks: CallStackEntry[];
+    usages: UsageEntry[];
+  } {
     const callStacks: CallStackEntry[] = [];
     const usages: UsageEntry[] = [];
 
@@ -597,12 +656,12 @@ export class ResponseParser {
         .filter((e) => typeof e['name'] === 'string')
         .map((e) => ({
           name: e['name'] as string,
-          description: typeof e['description'] === 'string' ? e['description'] as string : '',
-          input: typeof e['input'] === 'string' ? e['input'] as string : '',
-          output: typeof e['output'] === 'string' ? e['output'] as string : '',
-          filePath: typeof e['filePath'] === 'string' ? e['filePath'] as string : undefined,
-          line: typeof e['line'] === 'number' ? e['line'] as number : undefined,
-          kind: typeof e['kind'] === 'string' ? e['kind'] as string : undefined,
+          description: typeof e['description'] === 'string' ? (e['description'] as string) : '',
+          input: typeof e['input'] === 'string' ? (e['input'] as string) : '',
+          output: typeof e['output'] === 'string' ? (e['output'] as string) : '',
+          filePath: typeof e['filePath'] === 'string' ? (e['filePath'] as string) : undefined,
+          line: typeof e['line'] === 'number' ? (e['line'] as number) : undefined,
+          kind: typeof e['kind'] === 'string' ? (e['kind'] as string) : undefined,
         }));
     } catch (err) {
       logger.warn(`ResponseParser._parseSubFunctions: JSON parse error: ${err}`);
@@ -715,8 +774,12 @@ export class ResponseParser {
           line: typeof e['line'] === 'number' ? e['line'] : 0,
           overview: String(e['overview']),
           keyPoints: Array.isArray(e['keyPoints']) ? e['keyPoints'].map(String) : undefined,
-          dependencies: Array.isArray(e['dependencies']) ? e['dependencies'].map(String) : undefined,
-          potentialIssues: Array.isArray(e['potentialIssues']) ? e['potentialIssues'].map(String) : undefined,
+          dependencies: Array.isArray(e['dependencies'])
+            ? e['dependencies'].map(String)
+            : undefined,
+          potentialIssues: Array.isArray(e['potentialIssues'])
+            ? e['potentialIssues'].map(String)
+            : undefined,
         });
       }
 
@@ -743,7 +806,15 @@ export class ResponseParser {
         return [];
       }
 
-      const validTypes = new Set(['created', 'assigned', 'read', 'modified', 'consumed', 'returned', 'passed']);
+      const validTypes = new Set([
+        'created',
+        'assigned',
+        'read',
+        'modified',
+        'consumed',
+        'returned',
+        'passed',
+      ]);
       return entries
         .filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null)
         .filter((e) => typeof e['type'] === 'string' && typeof e['description'] === 'string')
@@ -821,9 +892,7 @@ export class ResponseParser {
       }
       const e = entry as Record<string, unknown>;
 
-      const label = typeof e['label'] === 'string' && e['label'].length > 0
-        ? e['label']
-        : null;
+      const label = typeof e['label'] === 'string' && e['label'].length > 0 ? e['label'] : null;
       if (!label) {
         logger.warn('ResponseParser._parseDataKind: missing required "label" field');
         return null;
@@ -857,7 +926,14 @@ export class ResponseParser {
         return [];
       }
 
-      const validKinds = new Set(['field', 'method', 'property', 'constructor', 'getter', 'setter']);
+      const validKinds = new Set([
+        'field',
+        'method',
+        'property',
+        'constructor',
+        'getter',
+        'setter',
+      ]);
       const validVisibility = new Set(['public', 'private', 'protected', 'internal']);
 
       return entries
@@ -865,9 +941,13 @@ export class ResponseParser {
         .filter((e) => typeof e['name'] === 'string')
         .map((e) => ({
           name: e['name'] as string,
-          memberKind: (validKinds.has(e['memberKind'] as string) ? e['memberKind'] : 'field') as ClassMemberInfo['memberKind'],
+          memberKind: (validKinds.has(e['memberKind'] as string)
+            ? e['memberKind']
+            : 'field') as ClassMemberInfo['memberKind'],
           typeName: typeof e['typeName'] === 'string' ? e['typeName'] : 'unknown',
-          visibility: (validVisibility.has(e['visibility'] as string) ? e['visibility'] : 'public') as ClassMemberInfo['visibility'],
+          visibility: (validVisibility.has(e['visibility'] as string)
+            ? e['visibility']
+            : 'public') as ClassMemberInfo['visibility'],
           isStatic: e['isStatic'] === true,
           description: typeof e['description'] === 'string' ? e['description'] : '',
           line: typeof e['line'] === 'number' ? e['line'] : undefined,

@@ -10,9 +10,10 @@ import type { PromptStrategy, PromptContext } from './PromptStrategy';
 
 export class PropertyPromptStrategy implements PromptStrategy {
   buildPrompt(symbol: SymbolInfo, context: PromptContext, lang: string): string {
-    const scopeCtx = symbol.scopeChain && symbol.scopeChain.length > 0
-      ? `\nScope chain: ${symbol.scopeChain.join(' → ')} → ${symbol.name}`
-      : '';
+    const scopeCtx =
+      symbol.scopeChain && symbol.scopeChain.length > 0
+        ? `\nScope chain: ${symbol.scopeChain.join(' → ')} → ${symbol.name}`
+        : '';
 
     const classCtx = context.containingClassName
       ? `\nContaining class: ${context.containingClassName}`

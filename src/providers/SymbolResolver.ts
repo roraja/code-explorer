@@ -78,9 +78,7 @@ export class SymbolResolver {
       (matchedKind === 'function' || matchedKind === 'method' || matchedKind === 'class') &&
       !match.symbol.selectionRange.contains(position)
     ) {
-      const localResult = await this._resolveViaDefinition(
-        document, position, relPath, symbols
-      );
+      const localResult = await this._resolveViaDefinition(document, position, relPath, symbols);
       if (localResult) {
         return localResult;
       }
@@ -107,9 +105,8 @@ export class SymbolResolver {
           character: match.symbol.range.end.character,
         },
       },
-      containerName: match.ancestors.length > 0
-        ? match.ancestors[match.ancestors.length - 1].name
-        : undefined,
+      containerName:
+        match.ancestors.length > 0 ? match.ancestors[match.ancestors.length - 1].name : undefined,
       scopeChain,
     };
 
@@ -165,11 +162,9 @@ export class SymbolResolver {
 
     const word = document.getText(wordRange);
     try {
-      const definitions = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>(
-        'vscode.executeDefinitionProvider',
-        document.uri,
-        position
-      );
+      const definitions = await vscode.commands.executeCommand<
+        (vscode.Location | vscode.LocationLink)[]
+      >('vscode.executeDefinitionProvider', document.uri, position);
 
       if (!definitions || definitions.length === 0) {
         return null;
@@ -184,10 +179,7 @@ export class SymbolResolver {
       const defRelPath = path.relative(workspaceRoot, defUri.fsPath);
 
       // Build scope chain from enclosing symbols at the definition site
-      const scopeChain = this._buildScopeChainForPosition(
-        allSymbols,
-        defRange.start
-      );
+      const scopeChain = this._buildScopeChainForPosition(allSymbols, defRange.start);
 
       // Determine kind: if it's defined inside a class, it's a property;
       // if inside a function, it's a variable.
@@ -239,11 +231,10 @@ export class SymbolResolver {
   ): string[] {
     for (const sym of symbols) {
       if (sym.range.contains(position)) {
-        const childChain = this._buildScopeChainForPosition(
-          sym.children,
-          position,
-          [...chain, sym.name]
-        );
+        const childChain = this._buildScopeChainForPosition(sym.children, position, [
+          ...chain,
+          sym.name,
+        ]);
         // Return the deepest chain found
         return childChain.length > chain.length ? childChain : [...chain, sym.name];
       }

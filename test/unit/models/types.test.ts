@@ -380,7 +380,12 @@ suite('Data Models', () => {
 
     test('supports all member kinds', () => {
       const kinds: ClassMemberInfo['memberKind'][] = [
-        'field', 'method', 'property', 'constructor', 'getter', 'setter',
+        'field',
+        'method',
+        'property',
+        'constructor',
+        'getter',
+        'setter',
       ];
       for (const kind of kinds) {
         const member: ClassMemberInfo = {

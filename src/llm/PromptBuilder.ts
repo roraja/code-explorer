@@ -44,11 +44,7 @@ export class PromptBuilder {
    * @param sourceCode  Source code of the symbol itself
    * @param containingScopeSource  Optional source of the containing scope (for variables/properties)
    */
-  static build(
-    symbol: SymbolInfo,
-    sourceCode: string,
-    containingScopeSource?: string
-  ): string {
+  static build(symbol: SymbolInfo, sourceCode: string, containingScopeSource?: string): string {
     const lang = this._guessLanguage(symbol.filePath);
     const strategy = STRATEGY_MAP[symbol.kind] || DEFAULT_STRATEGY;
 
@@ -63,9 +59,10 @@ export class PromptBuilder {
     const context: PromptContext = {
       sourceCode,
       containingScopeSource,
-      containingClassName: symbol.scopeChain && symbol.scopeChain.length > 0
-        ? symbol.scopeChain[symbol.scopeChain.length - 1]
-        : undefined,
+      containingClassName:
+        symbol.scopeChain && symbol.scopeChain.length > 0
+          ? symbol.scopeChain[symbol.scopeChain.length - 1]
+          : undefined,
     };
 
     return strategy.buildPrompt(symbol, context, lang);

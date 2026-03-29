@@ -367,7 +367,10 @@ A variable.
       const result = ResponseParser.parse(raw, testSymbol);
       assert.ok(result.variableLifecycle);
       assert.strictEqual(result.variableLifecycle!.declaration, 'Declared as const at line 15');
-      assert.strictEqual(result.variableLifecycle!.initialization, 'Initialized from database query');
+      assert.strictEqual(
+        result.variableLifecycle!.initialization,
+        'Initialized from database query'
+      );
       assert.strictEqual(result.variableLifecycle!.mutations.length, 2);
       assert.strictEqual(result.variableLifecycle!.consumption.length, 1);
       assert.strictEqual(result.variableLifecycle!.scopeAndLifetime, 'Function-scoped');
@@ -406,11 +409,17 @@ A variable.
 
       assert.ok(result.dataKind);
       assert.strictEqual(result.dataKind!.label, 'Cache / Lookup Table');
-      assert.strictEqual(result.dataKind!.description, 'Holds a Map keyed by cache key to AnalysisResult objects for O(1) lookups.');
+      assert.strictEqual(
+        result.dataKind!.description,
+        'Holds a Map keyed by cache key to AnalysisResult objects for O(1) lookups.'
+      );
       assert.strictEqual(result.dataKind!.examples.length, 2);
       assert.strictEqual(result.dataKind!.examples[0], 'new Map<string, AnalysisResult>()');
       assert.strictEqual(result.dataKind!.references.length, 2);
-      assert.strictEqual(result.dataKind!.references[0], 'AnalysisResult (src/models/types.ts:121)');
+      assert.strictEqual(
+        result.dataKind!.references[0],
+        'AnalysisResult (src/models/types.ts:121)'
+      );
     });
 
     test('extracts data kind with minimal fields (label only)', () => {

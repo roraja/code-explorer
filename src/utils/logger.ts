@@ -252,10 +252,7 @@ export const logger = {
       return;
     }
     try {
-      const section =
-        `\n---\n\n` +
-        `## Input (Prompt)\n\n` +
-        '```\n' + prompt + '\n```\n\n';
+      const section = `\n---\n\n` + `## Input (Prompt)\n\n` + '```\n' + prompt + '\n```\n\n';
       fs.appendFileSync(_activeLLMLogFile, section, 'utf-8');
     } catch {
       // silently skip
@@ -274,7 +271,8 @@ export const logger = {
         `---
 \n` +
         `## Output (Response)\n\n` +
-        response + '\n';
+        response +
+        '\n';
       fs.appendFileSync(_activeLLMLogFile, section, 'utf-8');
       _activeLLMLogFile = undefined; // done with this log
     } catch {

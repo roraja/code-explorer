@@ -27,6 +27,7 @@ interface Tab {
 }
 
 const LOADING_STAGE_LABELS: Record<string, string> = {
+  'resolving-symbol': 'Identifying symbol\u2026',
   'cache-check': 'Checking cache\u2026',
   'reading-source': 'Reading source code\u2026',
   'llm-analyzing': 'Running LLM analysis\u2026',
@@ -114,9 +115,10 @@ function renderTabBar(): string {
             ? '<span class="tab__status tab__status--error">✕</span>'
             : '';
       // Show scope context in tab label for nested symbols (e.g., "getUser › result")
-      const scope = tab.symbol.scopeChain && tab.symbol.scopeChain.length > 0
-        ? tab.symbol.scopeChain[tab.symbol.scopeChain.length - 1] + ' › '
-        : '';
+      const scope =
+        tab.symbol.scopeChain && tab.symbol.scopeChain.length > 0
+          ? tab.symbol.scopeChain[tab.symbol.scopeChain.length - 1] + ' › '
+          : '';
       return `<div class="tab${active}" data-tab-id="${tab.id}">
         <span class="tab__icon">${icon}</span>
         <span class="tab__label" title="${esc((tab.symbol.scopeChain || []).concat(tab.symbol.name).join('.'))}">${esc(scope)}${esc(tab.symbol.name)}</span>
@@ -186,7 +188,9 @@ function renderAnalysis(tab: Tab): string {
     const dk = a.dataKind;
     const parts: string[] = [];
     parts.push(`<div class="data-kind-item">`);
-    parts.push(`<div class="data-kind-item__label"><span class="badge badge--data-kind">📦 ${esc(dk.label)}</span></div>`);
+    parts.push(
+      `<div class="data-kind-item__label"><span class="badge badge--data-kind">📦 ${esc(dk.label)}</span></div>`
+    );
     if (dk.description) {
       parts.push(`<div class="data-kind-item__desc">${esc(dk.description)}</div>`);
     }
@@ -213,23 +217,27 @@ function renderAnalysis(tab: Tab): string {
   // Step-by-Step Breakdown (numbered functionalities)
   if (a.functionSteps && a.functionSteps.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const items = a.functionSteps.map((s: any) =>
-      `<li class="step-item"><span class="step-item__number">${s.step}.</span> ${esc(s.description)}</li>`
-    ).join('');
+    const items = a.functionSteps
+      .map(
+        (s: any) =>
+          `<li class="step-item"><span class="step-item__number">${s.step}.</span> ${esc(s.description)}</li>`
+      )
+      .join('');
     sections.push(renderSection('Step-by-Step Breakdown', `<ol class="step-list">${items}</ol>`));
   }
 
   // Sub-Functions
   if (a.subFunctions && a.subFunctions.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const items = a.subFunctions.map((sf: any) => {
-      const linkAttrs = sf.filePath
-        ? ` data-symbol-name="${esc(sf.name)}" data-symbol-file="${esc(sf.filePath)}" data-symbol-line="${sf.line || 0}" data-symbol-kind="${esc(sf.kind || 'function')}"`
-        : '';
-      const nameHtml = sf.filePath
-        ? `<a class="symbol-link" href="#"${linkAttrs}>${esc(sf.name)}</a>`
-        : `<strong>${esc(sf.name)}</strong>`;
-      return `<div class="subfunction-item">
+    const items = a.subFunctions
+      .map((sf: any) => {
+        const linkAttrs = sf.filePath
+          ? ` data-symbol-name="${esc(sf.name)}" data-symbol-file="${esc(sf.filePath)}" data-symbol-line="${sf.line || 0}" data-symbol-kind="${esc(sf.kind || 'function')}"`
+          : '';
+        const nameHtml = sf.filePath
+          ? `<a class="symbol-link" href="#"${linkAttrs}>${esc(sf.name)}</a>`
+          : `<strong>${esc(sf.name)}</strong>`;
+        return `<div class="subfunction-item">
         <div class="subfunction-item__header">${nameHtml}</div>
         <div class="subfunction-item__desc">${esc(sf.description)}</div>
         <div class="subfunction-item__io">
@@ -240,24 +248,31 @@ function renderAnalysis(tab: Tab): string {
         </div>
         ${sf.filePath ? `<div class="subfunction-item__file">${esc(shortPath(sf.filePath))}${sf.line ? ':' + sf.line : ''}</div>` : ''}
       </div>`;
-    }).join('');
-    sections.push(renderSection(`Sub-Functions (${a.subFunctions.length})`, `<div class="subfunction-list">${items}</div>`));
+      })
+      .join('');
+    sections.push(
+      renderSection(
+        `Sub-Functions (${a.subFunctions.length})`,
+        `<div class="subfunction-list">${items}</div>`
+      )
+    );
   }
 
   // Function Input
   if (a.functionInputs && a.functionInputs.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const items = a.functionInputs.map((p: any) => {
-      const typeLinkAttrs = p.typeFilePath
-        ? ` data-symbol-name="${esc(p.typeName)}" data-symbol-file="${esc(p.typeFilePath)}" data-symbol-line="${p.typeLine || 0}" data-symbol-kind="${esc(p.typeKind || 'type')}"`
-        : '';
-      const typeHtml = p.typeFilePath
-        ? `<a class="symbol-link" href="#"${typeLinkAttrs}>${esc(p.typeName)}</a>`
-        : `<code>${esc(p.typeName)}</code>`;
-      const mutatedBadge = p.mutated
-        ? `<span class="badge badge--mutated" title="${esc(p.mutationDetail || 'Mutates this parameter')}">⚡ mutated</span>`
-        : '<span class="badge badge--readonly">readonly</span>';
-      return `<div class="fn-param-item">
+    const items = a.functionInputs
+      .map((p: any) => {
+        const typeLinkAttrs = p.typeFilePath
+          ? ` data-symbol-name="${esc(p.typeName)}" data-symbol-file="${esc(p.typeFilePath)}" data-symbol-line="${p.typeLine || 0}" data-symbol-kind="${esc(p.typeKind || 'type')}"`
+          : '';
+        const typeHtml = p.typeFilePath
+          ? `<a class="symbol-link" href="#"${typeLinkAttrs}>${esc(p.typeName)}</a>`
+          : `<code>${esc(p.typeName)}</code>`;
+        const mutatedBadge = p.mutated
+          ? `<span class="badge badge--mutated" title="${esc(p.mutationDetail || 'Mutates this parameter')}">⚡ mutated</span>`
+          : '<span class="badge badge--readonly">readonly</span>';
+        return `<div class="fn-param-item">
         <div class="fn-param-item__header">
           <span class="fn-param-item__name">${esc(p.name)}</span>
           <span class="fn-param-item__type">${typeHtml}</span>
@@ -267,8 +282,14 @@ function renderAnalysis(tab: Tab): string {
         ${p.mutated && p.mutationDetail ? `<div class="fn-param-item__mutation">⚡ ${esc(p.mutationDetail)}</div>` : ''}
         ${p.typeOverview ? `<div class="fn-param-item__type-overview">${esc(p.typeOverview)}</div>` : ''}
       </div>`;
-    }).join('');
-    sections.push(renderSection(`Function Input (${a.functionInputs.length})`, `<div class="fn-param-list">${items}</div>`));
+      })
+      .join('');
+    sections.push(
+      renderSection(
+        `Function Input (${a.functionInputs.length})`,
+        `<div class="fn-param-list">${items}</div>`
+      )
+    );
   }
 
   // Function Output
@@ -289,6 +310,121 @@ function renderAnalysis(tab: Tab): string {
       ${out.typeOverview ? `<div class="fn-output-item__type-overview">${esc(out.typeOverview)}</div>` : ''}
     </div>`;
     sections.push(renderSection('Function Output', content));
+  }
+
+  // Class Members
+  if (a.classMembers && a.classMembers.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items = a.classMembers
+      .map((m: any) => {
+        const staticBadge = m.isStatic
+          ? '<span class="badge badge--static-member">static</span>'
+          : '';
+        const visBadge = `<span class="badge badge--visibility badge--vis-${esc(m.visibility || 'public')}">${esc(m.visibility || 'public')}</span>`;
+        return `<div class="class-member-item">
+        <div class="class-member-item__header">
+          <span class="class-member-item__kind">${memberKindIcon(m.memberKind)}</span>
+          <span class="class-member-item__name">${esc(m.name)}</span>
+          <code class="class-member-item__type">${esc(m.typeName || '')}</code>
+          ${visBadge}${staticBadge}
+        </div>
+        <div class="class-member-item__desc">${esc(m.description || '')}</div>
+      </div>`;
+      })
+      .join('');
+    sections.push(
+      renderSection(
+        `Class Members (${a.classMembers.length})`,
+        `<div class="class-member-list">${items}</div>`
+      )
+    );
+  }
+
+  // Member Access Patterns
+  if (a.memberAccess && a.memberAccess.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items = a.memberAccess
+      .map((ma: any) => {
+        const externalBadge = ma.externalAccess
+          ? '<span class="badge badge--external">external</span>'
+          : '';
+        const readers = (ma.readBy || []).join(', ') || 'none';
+        const writers = (ma.writtenBy || []).join(', ') || 'none';
+        return `<div class="member-access-item">
+        <div class="member-access-item__header">
+          <strong>${esc(ma.memberName)}</strong> ${externalBadge}
+        </div>
+        <div class="member-access-item__row">
+          <span class="member-access-item__label">Read by:</span> <span>${esc(readers)}</span>
+        </div>
+        <div class="member-access-item__row">
+          <span class="member-access-item__label">Written by:</span> <span>${esc(writers)}</span>
+        </div>
+      </div>`;
+      })
+      .join('');
+    sections.push(
+      renderSection('Member Access Patterns', `<div class="member-access-list">${items}</div>`)
+    );
+  }
+
+  // Variable Lifecycle
+  if (a.variableLifecycle) {
+    const vl = a.variableLifecycle;
+    const parts: string[] = [];
+    if (vl.declaration) {
+      parts.push(
+        `<div class="lifecycle-item"><span class="lifecycle-item__label">Declaration:</span> ${esc(vl.declaration)}</div>`
+      );
+    }
+    if (vl.initialization) {
+      parts.push(
+        `<div class="lifecycle-item"><span class="lifecycle-item__label">Initialization:</span> ${esc(vl.initialization)}</div>`
+      );
+    }
+    if (vl.mutations && vl.mutations.length > 0) {
+      const muts = vl.mutations.map((m: string) => `<li>${esc(m)}</li>`).join('');
+      parts.push(
+        `<div class="lifecycle-item"><span class="lifecycle-item__label">Mutations:</span><ul class="lifecycle-sublist">${muts}</ul></div>`
+      );
+    }
+    if (vl.consumption && vl.consumption.length > 0) {
+      const cons = vl.consumption.map((c: string) => `<li>${esc(c)}</li>`).join('');
+      parts.push(
+        `<div class="lifecycle-item"><span class="lifecycle-item__label">Consumption:</span><ul class="lifecycle-sublist">${cons}</ul></div>`
+      );
+    }
+    if (vl.scopeAndLifetime) {
+      parts.push(
+        `<div class="lifecycle-item"><span class="lifecycle-item__label">Scope & Lifetime:</span> ${esc(vl.scopeAndLifetime)}</div>`
+      );
+    }
+    if (parts.length > 0) {
+      sections.push(
+        renderSection('Variable Lifecycle', `<div class="lifecycle-list">${parts.join('')}</div>`)
+      );
+    }
+  }
+
+  // Data Flow
+  if (a.dataFlow && a.dataFlow.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items = a.dataFlow
+      .map((df: any) => {
+        const typeLabel = dataFlowIcon(df.type);
+        return `<div class="data-flow-item">
+        <span class="data-flow-item__type">${typeLabel}</span>
+        <span class="data-flow-item__desc">${esc(df.description)}</span>
+        ${df.filePath ? `<span class="data-flow-item__file">${esc(shortPath(df.filePath))}:${df.line}</span>` : ''}
+      </div>`;
+      })
+      .join('');
+    sections.push(
+      renderSection(
+        `Data Flow (${a.dataFlow.length})`,
+        `<div class="data-flow-list">${items}</div>`
+      )
+    );
   }
 
   // Key methods / points
@@ -436,7 +572,13 @@ function attachListeners(): void {
       const line = parseInt(link.dataset.symbolLine || '0', 10);
       const kind = link.dataset.symbolKind || 'function';
       if (symbolName) {
-        vscode.postMessage({ type: 'exploreSymbol', symbolName, filePath, line: line || undefined, kind });
+        vscode.postMessage({
+          type: 'exploreSymbol',
+          symbolName,
+          filePath,
+          line: line || undefined,
+          kind,
+        });
       }
     });
   });

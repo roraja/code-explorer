@@ -290,8 +290,10 @@ export class StaticAnalyzer {
             const range = container.range;
             const text = doc.getText(
               new vscode.Range(
-                range.start.line, range.start.character,
-                range.end.line, range.end.character
+                range.start.line,
+                range.start.character,
+                range.end.line,
+                range.end.character
               )
             );
             logger.debug(

@@ -11,7 +11,17 @@
  */
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { AnalysisResult, SymbolInfo, SymbolKindType, AnalysisMetadata, CursorContext, CallStackEntry, UsageEntry, DataFlowEntry, ClassMemberInfo } from '../models/types';
+import type {
+  AnalysisResult,
+  SymbolInfo,
+  SymbolKindType,
+  AnalysisMetadata,
+  CursorContext,
+  CallStackEntry,
+  UsageEntry,
+  DataFlowEntry,
+  ClassMemberInfo,
+} from '../models/types';
 import { SYMBOL_KIND_PREFIX } from '../models/types';
 import { CACHE, ANALYSIS_VERSION, CACHE_FALLBACK_LLM_TIMEOUT_MS } from '../models/constants';
 import { logger } from '../utils/logger';
@@ -121,9 +131,7 @@ export class CacheStore {
     try {
       entries = await fs.readdir(cacheDir);
     } catch {
-      logger.debug(
-        `CacheStore.findByCursor: cache directory does not exist: ${cacheDir}`
-      );
+      logger.debug(`CacheStore.findByCursor: cache directory does not exist: ${cacheDir}`);
       return null;
     }
 
@@ -145,18 +153,14 @@ export class CacheStore {
       try {
         content = await fs.readFile(fullPath, 'utf-8');
       } catch (err) {
-        logger.debug(
-          `CacheStore.findByCursor: cannot read ${mdFile}: ${err}`
-        );
+        logger.debug(`CacheStore.findByCursor: cannot read ${mdFile}: ${err}`);
         continue;
       }
 
       // Quick-parse just the frontmatter (no full deserialization yet)
       const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
       if (!fmMatch) {
-        logger.debug(
-          `CacheStore.findByCursor: ${mdFile} has no frontmatter — skipping`
-        );
+        logger.debug(`CacheStore.findByCursor: ${mdFile} has no frontmatter — skipping`);
         continue;
       }
 
@@ -164,9 +168,7 @@ export class CacheStore {
       const cachedSymbolName = fm['symbol'] || '';
       const cachedLine = parseInt(fm['line'] || '', 10);
       const cachedKind = (fm['kind'] || 'unknown') as SymbolKindType;
-      const cachedScopeChain = fm['scope_chain']
-        ? fm['scope_chain'].split('.')
-        : [];
+      const cachedScopeChain = fm['scope_chain'] ? fm['scope_chain'].split('.') : [];
 
       logger.debug(
         `CacheStore.findByCursor: checking ${mdFile} — ` +
@@ -185,9 +187,7 @@ export class CacheStore {
       }
 
       if (isNaN(cachedLine)) {
-        logger.debug(
-          `CacheStore.findByCursor: ${mdFile} — line is NaN — skipping`
-        );
+        logger.debug(`CacheStore.findByCursor: ${mdFile} — line is NaN — skipping`);
         continue;
       }
 
@@ -207,17 +207,14 @@ export class CacheStore {
         kind: cachedKind,
         filePath,
         position: { line: cachedLine, character: 0 },
-        containerName: cachedScopeChain.length > 0
-          ? cachedScopeChain[cachedScopeChain.length - 1]
-          : undefined,
+        containerName:
+          cachedScopeChain.length > 0 ? cachedScopeChain[cachedScopeChain.length - 1] : undefined,
         scopeChain: cachedScopeChain,
       };
 
       const result = this._deserialize(content, symbolInfo);
       if (!result) {
-        logger.debug(
-          `CacheStore.findByCursor: ${mdFile} — deserialization failed — skipping`
-        );
+        logger.debug(`CacheStore.findByCursor: ${mdFile} — deserialization failed — skipping`);
         continue;
       }
 
@@ -292,9 +289,7 @@ export class CacheStore {
       const name = fm['symbol'] || '';
       const kind = (fm['kind'] || 'unknown') as SymbolKindType;
       const line = parseInt(fm['line'] || '', 10);
-      const scopeChain = fm['scope_chain']
-        ? fm['scope_chain'].split('.')
-        : [];
+      const scopeChain = fm['scope_chain'] ? fm['scope_chain'].split('.') : [];
 
       if (!name || isNaN(line)) {
         continue;
@@ -310,7 +305,9 @@ export class CacheStore {
       summaries.push({ fileName: mdFile, name, kind, line, scopeChain, overviewSnippet });
     }
 
-    logger.debug(`CacheStore.listCachedSymbols: found ${summaries.length} cached symbols in ${filePath}`);
+    logger.debug(
+      `CacheStore.listCachedSymbols: found ${summaries.length} cached symbols in ${filePath}`
+    );
     return summaries;
   }
 
@@ -336,11 +333,7 @@ export class CacheStore {
     workspaceRoot: string
   ): Promise<{ symbol: SymbolInfo; result: AnalysisResult } | null> {
     // Step 1: Try the fast exact-match first
-    const exactMatch = await this.findByCursor(
-      cursor.word,
-      cursor.filePath,
-      cursor.position.line
-    );
+    const exactMatch = await this.findByCursor(cursor.word, cursor.filePath, cursor.position.line);
     if (exactMatch) {
       return exactMatch;
     }
@@ -456,9 +449,7 @@ If no match, output:
       const reason = matchResult?.reason || '';
 
       if (matchedIndex === null || matchedIndex === undefined || confidence === 'none') {
-        logger.info(
-          `CacheStore.findByCursorWithLLMFallback: LLM says no match. Reason: ${reason}`
-        );
+        logger.info(`CacheStore.findByCursorWithLLMFallback: LLM says no match. Reason: ${reason}`);
         return null;
       }
 
@@ -496,9 +487,10 @@ If no match, output:
         kind: matched.kind,
         filePath: cursor.filePath,
         position: { line: matched.line, character: 0 },
-        containerName: matched.scopeChain.length > 0
-          ? matched.scopeChain[matched.scopeChain.length - 1]
-          : undefined,
+        containerName:
+          matched.scopeChain.length > 0
+            ? matched.scopeChain[matched.scopeChain.length - 1]
+            : undefined,
         scopeChain: matched.scopeChain,
       };
 
@@ -561,9 +553,10 @@ If no match, output:
    */
   private _buildCacheKey(symbol: SymbolInfo): string {
     const prefix = SYMBOL_KIND_PREFIX[symbol.kind] || 'sym';
-    const chain = symbol.scopeChain && symbol.scopeChain.length > 0
-      ? symbol.scopeChain.map((s) => this._sanitizeName(s)).join('.')
-      : null;
+    const chain =
+      symbol.scopeChain && symbol.scopeChain.length > 0
+        ? symbol.scopeChain.map((s) => this._sanitizeName(s)).join('.')
+        : null;
 
     // Fallback: use containerName for symbols resolved without a scope chain
     // (e.g., programmatic calls from other extensions)
@@ -645,7 +638,9 @@ If no match, output:
       for (let i = 0; i < result.callStacks.length; i++) {
         const cs = result.callStacks[i];
         const chain = cs.chain || `${cs.caller.name} → ${s.name}`;
-        lines.push(`${i + 1}. **${cs.caller.name}** — \`${cs.caller.filePath}:${cs.caller.line}\` — ${chain}`);
+        lines.push(
+          `${i + 1}. **${cs.caller.name}** — \`${cs.caller.filePath}:${cs.caller.line}\` — ${chain}`
+        );
       }
       lines.push('');
 
@@ -704,7 +699,10 @@ If no match, output:
     }
 
     // Variable Lifecycle
-    if (result.variableLifecycle && (result.variableLifecycle.declaration || result.variableLifecycle.initialization)) {
+    if (
+      result.variableLifecycle &&
+      (result.variableLifecycle.declaration || result.variableLifecycle.initialization)
+    ) {
       lines.push('## Variable Lifecycle');
       lines.push('');
       lines.push('```json:variable_lifecycle');
@@ -751,7 +749,9 @@ If no match, output:
       lines.push('');
       for (const m of result.classMembers) {
         const staticLabel = m.isStatic ? 'static ' : '';
-        lines.push(`- **${m.visibility} ${staticLabel}${m.memberKind}** \`${m.name}: ${m.typeName}\` — ${m.description}`);
+        lines.push(
+          `- **${m.visibility} ${staticLabel}${m.memberKind}** \`${m.name}: ${m.typeName}\` — ${m.description}`
+        );
       }
       lines.push('');
 
@@ -766,7 +766,9 @@ If no match, output:
       lines.push('## Member Access Patterns');
       lines.push('');
       for (const ma of result.memberAccess) {
-        lines.push(`- **${ma.memberName}**: read by [${ma.readBy.join(', ')}], written by [${ma.writtenBy.join(', ')}]${ma.externalAccess ? ' (external access)' : ''}`);
+        lines.push(
+          `- **${ma.memberName}**: read by [${ma.readBy.join(', ')}], written by [${ma.writtenBy.join(', ')}]${ma.externalAccess ? ' (external access)' : ''}`
+        );
       }
       lines.push('');
 
@@ -844,7 +846,12 @@ If no match, output:
       const { callStacks, usages } = this._parseCallersJson(body);
 
       // Parse data flow from json:data_flow block
-      const dataFlow = this._parseJsonBlock<{ type: string; filePath: string; line: number; description: string }>(body, 'data_flow');
+      const dataFlow = this._parseJsonBlock<{
+        type: string;
+        filePath: string;
+        line: number;
+        description: string;
+      }>(body, 'data_flow');
 
       // Parse variable lifecycle from json:variable_lifecycle block
       const variableLifecycle = this._parseJsonObjectBlock<{
@@ -865,13 +872,21 @@ If no match, output:
 
       // Parse class members from json:class_members block
       const classMembers = this._parseJsonBlock<{
-        name: string; memberKind: string; typeName: string;
-        visibility: string; isStatic: boolean; description: string; line?: number;
+        name: string;
+        memberKind: string;
+        typeName: string;
+        visibility: string;
+        isStatic: boolean;
+        description: string;
+        line?: number;
       }>(body, 'class_members');
 
       // Parse member access from json:member_access block
       const memberAccess = this._parseJsonBlock<{
-        memberName: string; readBy: string[]; writtenBy: string[]; externalAccess: boolean;
+        memberName: string;
+        readBy: string[];
+        writtenBy: string[];
+        externalAccess: boolean;
       }>(body, 'member_access');
 
       return {
@@ -890,34 +905,45 @@ If no match, output:
         dependencies: this._parseList(sections['dependencies']),
         usagePattern: sections['usage pattern'] || '',
         potentialIssues: this._parseList(sections['potential issues']),
-        variableLifecycle: variableLifecycle ? {
-          declaration: variableLifecycle.declaration || '',
-          initialization: variableLifecycle.initialization || '',
-          mutations: variableLifecycle.mutations || [],
-          consumption: variableLifecycle.consumption || [],
-          scopeAndLifetime: variableLifecycle.scopeAndLifetime || '',
-        } : undefined,
-        dataKind: dataKind && dataKind.label ? {
-          label: dataKind.label,
-          description: dataKind.description || '',
-          examples: Array.isArray(dataKind.examples) ? dataKind.examples : [],
-          references: Array.isArray(dataKind.references) ? dataKind.references : [],
-        } : undefined,
-        classMembers: classMembers.length > 0 ? classMembers.map((m) => ({
-          name: m.name,
-          memberKind: m.memberKind as ClassMemberInfo['memberKind'],
-          typeName: m.typeName,
-          visibility: m.visibility as ClassMemberInfo['visibility'],
-          isStatic: m.isStatic,
-          description: m.description,
-          line: m.line,
-        })) : undefined,
-        memberAccess: memberAccess.length > 0 ? memberAccess.map((ma) => ({
-          memberName: ma.memberName,
-          readBy: ma.readBy,
-          writtenBy: ma.writtenBy,
-          externalAccess: ma.externalAccess,
-        })) : undefined,
+        variableLifecycle: variableLifecycle
+          ? {
+              declaration: variableLifecycle.declaration || '',
+              initialization: variableLifecycle.initialization || '',
+              mutations: variableLifecycle.mutations || [],
+              consumption: variableLifecycle.consumption || [],
+              scopeAndLifetime: variableLifecycle.scopeAndLifetime || '',
+            }
+          : undefined,
+        dataKind:
+          dataKind && dataKind.label
+            ? {
+                label: dataKind.label,
+                description: dataKind.description || '',
+                examples: Array.isArray(dataKind.examples) ? dataKind.examples : [],
+                references: Array.isArray(dataKind.references) ? dataKind.references : [],
+              }
+            : undefined,
+        classMembers:
+          classMembers.length > 0
+            ? classMembers.map((m) => ({
+                name: m.name,
+                memberKind: m.memberKind as ClassMemberInfo['memberKind'],
+                typeName: m.typeName,
+                visibility: m.visibility as ClassMemberInfo['visibility'],
+                isStatic: m.isStatic,
+                description: m.description,
+                line: m.line,
+              }))
+            : undefined,
+        memberAccess:
+          memberAccess.length > 0
+            ? memberAccess.map((ma) => ({
+                memberName: ma.memberName,
+                readBy: ma.readBy,
+                writtenBy: ma.writtenBy,
+                externalAccess: ma.externalAccess,
+              }))
+            : undefined,
         metadata,
       };
     } catch (err) {
@@ -969,9 +995,7 @@ If no match, output:
    * Parse the ```json:callers ... ``` block from cached markdown
    * into CallStackEntry[] and UsageEntry[].
    */
-  private _parseCallersJson(
-    body: string
-  ): { callStacks: CallStackEntry[]; usages: UsageEntry[] } {
+  private _parseCallersJson(body: string): { callStacks: CallStackEntry[]; usages: UsageEntry[] } {
     const callStacks: CallStackEntry[] = [];
     const usages: UsageEntry[] = [];
 
@@ -1062,7 +1086,9 @@ If no match, output:
     }
     try {
       const parsed = JSON.parse(match[1]);
-      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : null;
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+        ? parsed
+        : null;
     } catch {
       return null;
     }

@@ -570,6 +570,75 @@ export interface CacheStats {
 }
 
 // =====================
+// Navigation History
+// =====================
+
+/**
+ * Trigger that caused a navigation from one tab to another.
+ * Helps the breadcrumb trail show context about *why* a navigation happened.
+ */
+export type NavigationTrigger =
+  | 'explore-command'
+  | 'symbol-link'
+  | 'sub-function'
+  | 'caller'
+  | 'relationship'
+  | 'type-link'
+  | 'breadcrumb'
+  | 'history-back'
+  | 'history-forward'
+  | 'tab-click'
+  | 'session-restore';
+
+/**
+ * A single entry in the exploration navigation history.
+ * Records a navigation from one tab to another, forming a breadcrumb trail.
+ */
+export interface NavigationEntry {
+  /** Tab ID that was navigated FROM (null for the first exploration) */
+  fromTabId: string | null;
+  /** Tab ID that was navigated TO */
+  toTabId: string;
+  /** What triggered this navigation */
+  trigger: NavigationTrigger;
+  /** ISO 8601 timestamp of when the navigation happened */
+  timestamp: string;
+  /** Symbol name of the destination (for display in breadcrumbs) */
+  symbolName: string;
+  /** Symbol kind of the destination (for icon display) */
+  symbolKind: string;
+}
+
+/**
+ * A named investigation that the user has pinned for later reference.
+ * Captures a breadcrumb trail under a human-readable name.
+ */
+export interface PinnedInvestigation {
+  /** Unique ID for this investigation */
+  id: string;
+  /** User-provided name (e.g., "Tracing the cache miss bug") */
+  name: string;
+  /** The breadcrumb trail (sequence of tab IDs in exploration order) */
+  trail: string[];
+  /** Symbol names corresponding to each tab ID (for display after tabs are closed) */
+  trailSymbols: { tabId: string; symbolName: string; symbolKind: string }[];
+  /** ISO 8601 timestamp of when this investigation was pinned */
+  pinnedAt: string;
+}
+
+/**
+ * Full navigation history state, pushed to the webview alongside tab state.
+ */
+export interface NavigationHistoryState {
+  /** The ordered list of navigation entries forming the history */
+  entries: NavigationEntry[];
+  /** Current position in the history stack (index into entries). -1 means empty. */
+  currentIndex: number;
+  /** Pinned investigations saved by the user */
+  pinnedInvestigations: PinnedInvestigation[];
+}
+
+// =====================
 // UI State
 // =====================
 
@@ -602,6 +671,8 @@ export interface TabState {
   error?: string;
   /** Current loading stage for granular progress display */
   loadingStage?: LoadingStage;
+  /** True while an enhance (Q&A) request is in progress — keeps existing content visible */
+  enhancing?: boolean;
 }
 
 /** Root state for the explorer sidebar. */
@@ -643,11 +714,20 @@ export interface CodeContext {
 // =====================
 
 /** Messages sent from the extension to the webview. */
-export type ExtensionToWebviewMessage = {
-  type: 'setState';
-  tabs: TabState[];
-  activeTabId: string | null;
-};
+export type ExtensionToWebviewMessage =
+  | {
+      type: 'setState';
+      tabs: TabState[];
+      activeTabId: string | null;
+      /** Navigation history for breadcrumb trail display */
+      navigationHistory?: NavigationHistoryState;
+    }
+  | {
+      type: 'showDependencyGraph';
+      mermaidSource: string;
+      nodeCount: number;
+      edgeCount: number;
+    };
 
 /** Messages sent from the webview to the extension. */
 export type WebviewToExtensionMessage =
@@ -658,7 +738,16 @@ export type WebviewToExtensionMessage =
   | { type: 'navigateToSource'; filePath: string; line: number; character: number }
   | { type: 'retryAnalysis'; tabId: string }
   | { type: 'exploreSymbol'; symbolName: string; filePath?: string; line?: number; kind?: string }
-  | { type: 'enhanceAnalysis'; tabId: string; userPrompt: string };
+  | { type: 'navigateToSymbol'; symbolName: string }
+  | { type: 'enhanceAnalysis'; tabId: string; userPrompt: string }
+  | { type: 'requestDependencyGraph' }
+  | { type: 'requestSymbolGraph'; symbolName: string; filePath: string }
+  | { type: 'closeDependencyGraph' }
+  | { type: 'historyBack' }
+  | { type: 'historyForward' }
+  | { type: 'pinInvestigation'; name: string }
+  | { type: 'unpinInvestigation'; investigationId: string }
+  | { type: 'restoreInvestigation'; investigationId: string };
 
 // =====================
 // Queued Analysis

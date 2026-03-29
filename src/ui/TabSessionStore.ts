@@ -10,7 +10,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import type { SymbolInfo } from '../models/types';
+import type { SymbolInfo, NavigationEntry, PinnedInvestigation } from '../models/types';
 import { logger } from '../utils/logger';
 
 /** Minimal per-tab data needed to reconstruct tabs on restore. */
@@ -31,6 +31,12 @@ export interface TabSession {
   tabs: PersistedTab[];
   /** ID of the active tab at save time (may be null) */
   activeTabId: string | null;
+  /** Navigation history entries (optional for backward compatibility) */
+  navigationHistory?: NavigationEntry[];
+  /** Navigation history current index (optional for backward compatibility) */
+  navigationIndex?: number;
+  /** Pinned investigations (optional for backward compatibility) */
+  pinnedInvestigations?: PinnedInvestigation[];
 }
 
 const SESSION_FILE_NAME = 'tab-session.json';
@@ -54,12 +60,21 @@ export class TabSessionStore {
    *
    * Uses synchronous write to avoid race conditions with rapid state changes.
    */
-  save(tabs: PersistedTab[], activeTabId: string | null): void {
+  save(
+    tabs: PersistedTab[],
+    activeTabId: string | null,
+    navigationHistory?: NavigationEntry[],
+    navigationIndex?: number,
+    pinnedInvestigations?: PinnedInvestigation[]
+  ): void {
     const session: TabSession = {
       version: 1,
       savedAt: new Date().toISOString(),
       tabs,
       activeTabId,
+      navigationHistory,
+      navigationIndex,
+      pinnedInvestigations,
     };
 
     try {

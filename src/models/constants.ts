@@ -23,6 +23,7 @@ export const COMMANDS = {
   INSTALL_GLOBAL_SKILLS: 'codeExplorer.installGlobalSkills',
   PULL_ADO_CONTENT: 'codeExplorer.pullAdoContent',
   PUSH_ADO_CONTENT: 'codeExplorer.pushAdoContent',
+  SHOW_DEPENDENCY_GRAPH: 'codeExplorer.showDependencyGraph',
 } as const;
 
 /** Configuration setting keys (under "codeExplorer." namespace). */
@@ -37,6 +38,7 @@ export const CONFIG = {
   OPEN_ON_CLICK: 'codeExplorer.openOnClick',
   MAX_CALL_STACK_DEPTH: 'codeExplorer.maxCallStackDepth',
   SHOW_HOVER_CARDS: 'codeExplorer.showHoverCards',
+  SHOW_CODE_LENS: 'codeExplorer.showCodeLens',
 } as const;
 
 /** Cache directory and file constants. */

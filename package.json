@@ -104,6 +104,12 @@
         "title": "Push ADO Content",
         "category": "Code Explorer",
         "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "codeExplorer.showDependencyGraph",
+        "title": "Show Dependency Graph",
+        "category": "Code Explorer",
+        "icon": "$(type-hierarchy)"
       }
     ],
     "menus": {
@@ -227,6 +233,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show Code Explorer info in hover tooltips."
+        },
+        "codeExplorer.showCodeLens": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show contextual 'why?' annotations inline in the editor above analyzed symbols. Requires cached analysis data."
         }
       }
     }

@@ -15,6 +15,9 @@ import { LLMProviderFactory } from './llm/LLMProviderFactory';
 import { logger, LogLevel } from './utils/logger';
 import { SkillInstaller } from './skills/SkillInstaller';
 import { pullAdoContent, pushAdoContent } from './git/AdoSync';
+import { CodeExplorerHoverProvider } from './providers/CodeExplorerHoverProvider';
+import { CodeExplorerCodeLensProvider } from './providers/CodeExplorerCodeLensProvider';
+import { GraphBuilder } from './graph/GraphBuilder';
 import type { CursorContext } from './models/types';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -70,6 +73,39 @@ export function activate(context: vscode.ExtensionContext): void {
       webviewOptions: { retainContextWhenHidden: true },
     })
   );
+
+  // --- Hover Provider ---
+  const hoverProvider = new CodeExplorerHoverProvider(cacheStore, workspaceRoot);
+  const hoverLanguages = [
+    'typescript', 'javascript', 'typescriptreact', 'javascriptreact',
+    'cpp', 'c', 'python', 'java', 'csharp',
+  ];
+  for (const lang of hoverLanguages) {
+    context.subscriptions.push(
+      vscode.languages.registerHoverProvider({ language: lang }, hoverProvider)
+    );
+  }
+  logger.info(`Hover provider registered for ${hoverLanguages.length} languages`);
+
+  // --- CodeLens Provider ---
+  const codeLensProvider = new CodeExplorerCodeLensProvider(cacheStore, workspaceRoot);
+  const codeLensLanguages = [
+    'typescript', 'javascript', 'typescriptreact', 'javascriptreact',
+    'cpp', 'c', 'python', 'java', 'csharp',
+  ];
+  for (const lang of codeLensLanguages) {
+    context.subscriptions.push(
+      vscode.languages.registerCodeLensProvider({ language: lang }, codeLensProvider)
+    );
+  }
+  context.subscriptions.push({ dispose: () => codeLensProvider.dispose() });
+  logger.info(`CodeLens provider registered for ${codeLensLanguages.length} languages`);
+
+  // --- Graph Builder ---
+  const graphBuilder = new GraphBuilder(workspaceRoot);
+
+  // Make graph builder available to the view provider for webview message handling
+  viewProvider.setGraphBuilder(graphBuilder);
 
   // --- Commands ---
   context.subscriptions.push(
@@ -396,6 +432,72 @@ export function activate(context: vscode.ExtensionContext): void {
 
             logger.info(`pushAdoContent: ${result.message}`);
             logger.debug(`pushAdoContent details:\n${result.details}`);
+          }
+        );
+      } finally {
+        logger.endCommandLog();
+      }
+    }),
+
+    vscode.commands.registerCommand(COMMANDS.SHOW_DEPENDENCY_GRAPH, async () => {
+      logger.startCommandLog('show-dependency-graph');
+      try {
+        logger.info('Command: showDependencyGraph invoked');
+
+        await vscode.commands.executeCommand('codeExplorer.sidebar.focus');
+
+        // Get the current cursor symbol to center the graph on it
+        const editor = vscode.window.activeTextEditor;
+        let cursorWord: string | undefined;
+        let cursorFilePath: string | undefined;
+
+        if (editor) {
+          const position = editor.selection.active;
+          const wordRange = editor.document.getWordRangeAtPosition(position);
+          if (wordRange) {
+            cursorWord = editor.document.getText(wordRange);
+            cursorFilePath = path.relative(workspaceRoot, editor.document.fileName);
+          }
+        }
+
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Code Explorer: Building dependency graph...',
+            cancellable: false,
+          },
+          async () => {
+            try {
+              // Default to a focused subgraph around the current symbol
+              let graph;
+              if (cursorWord && cursorFilePath) {
+                graph = await graphBuilder.buildSubgraph(cursorWord, cursorFilePath);
+                // Fall back to full graph if subgraph is empty (symbol not cached)
+                if (graph.nodes.length === 0) {
+                  logger.info('showDependencyGraph: subgraph empty, falling back to full graph');
+                  graph = await graphBuilder.buildGraph();
+                }
+              } else {
+                graph = await graphBuilder.buildGraph();
+              }
+
+              const centerId = cursorWord && cursorFilePath
+                ? graph.nodes.find(
+                    (n) => n.name === cursorWord && n.filePath === cursorFilePath
+                  )?.id
+                : undefined;
+              const mermaidSource = GraphBuilder.toMermaid(graph, centerId);
+              viewProvider.showDependencyGraph(
+                mermaidSource,
+                graph.nodes.length,
+                graph.edges.length
+              );
+            } catch (err) {
+              logger.error(`showDependencyGraph: failed: ${err}`);
+              vscode.window.showErrorMessage(
+                'Code Explorer: Failed to build dependency graph. Make sure you have cached analyses.'
+              );
+            }
           }
         );
       } finally {

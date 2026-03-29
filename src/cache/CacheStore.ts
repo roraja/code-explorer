@@ -97,6 +97,72 @@ export class CacheStore {
     }
   }
 
+  /**
+   * Read all cached analyses for a given source file.
+   * Scans the cache directory for the file and deserializes every `.md` file.
+   *
+   * Used by CodeLensProvider to show inline annotations for all analyzed
+   * symbols in the currently open file.
+   *
+   * @param filePath  Relative path to the source file from workspace root
+   * @returns Array of AnalysisResult for all cached symbols in that file
+   */
+  async readAllForFile(filePath: string): Promise<AnalysisResult[]> {
+    const cacheDir = path.join(this._cacheRoot, filePath);
+    logger.debug(`CacheStore.readAllForFile: scanning ${cacheDir}`);
+
+    let entries: string[];
+    try {
+      entries = await fs.readdir(cacheDir);
+    } catch {
+      logger.debug(`CacheStore.readAllForFile: directory does not exist: ${cacheDir}`);
+      return [];
+    }
+
+    const mdFiles = entries.filter((e) => e.endsWith('.md'));
+    if (mdFiles.length === 0) {
+      return [];
+    }
+
+    const results: AnalysisResult[] = [];
+    for (const mdFile of mdFiles) {
+      const fullPath = path.join(cacheDir, mdFile);
+      try {
+        const content = await fs.readFile(fullPath, 'utf-8');
+        const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+        if (!fmMatch) {
+          continue;
+        }
+
+        const fm = this._parseFrontmatter(fmMatch[1]);
+        const symbolName = fm['symbol'] || '';
+        const kind = fm['kind'] || 'unknown';
+        const line = parseInt(fm['line'] || '0', 10);
+        const scopeChain = fm['scope_chain'] ? fm['scope_chain'].split('.') : [];
+
+        const symbolInfo: SymbolInfo = {
+          name: symbolName,
+          kind: kind as SymbolKindType,
+          filePath,
+          position: { line, character: 0 },
+          scopeChain: scopeChain.length > 0 ? scopeChain : undefined,
+        };
+
+        const result = this._deserialize(content, symbolInfo);
+        if (result) {
+          results.push(result);
+        }
+      } catch (err) {
+        logger.debug(`CacheStore.readAllForFile: failed to read ${mdFile}: ${err}`);
+      }
+    }
+
+    logger.debug(
+      `CacheStore.readAllForFile: found ${results.length} cached analyses for ${filePath}`
+    );
+    return results;
+  }
+
   // ── Fuzzy Cursor Lookup ────────────────────────────────
 
   /** Tolerance for line-number matching when looking up by cursor (±3 lines). */

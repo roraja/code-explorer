@@ -25,6 +25,34 @@ interface Tab {
   analysis: any;
   error?: string;
   loadingStage?: string;
+  /** True while an enhance (Q&A) request is in progress */
+  enhancing?: boolean;
+}
+
+/** Navigation entry from the extension's history stack */
+interface NavigationEntry {
+  fromTabId: string | null;
+  toTabId: string;
+  trigger: string;
+  timestamp: string;
+  symbolName: string;
+  symbolKind: string;
+}
+
+/** Pinned investigation bookmark */
+interface PinnedInvestigation {
+  id: string;
+  name: string;
+  trail: string[];
+  trailSymbols: { tabId: string; symbolName: string; symbolKind: string }[];
+  pinnedAt: string;
+}
+
+/** Navigation history state from the extension */
+interface NavigationHistoryState {
+  entries: NavigationEntry[];
+  currentIndex: number;
+  pinnedInvestigations: PinnedInvestigation[];
 }
 
 const LOADING_STAGE_LABELS: Record<string, string> = {
@@ -37,8 +65,17 @@ const LOADING_STAGE_LABELS: Record<string, string> = {
 
 let currentTabs: Tab[] = [];
 let currentActiveTabId: string | null = null;
+/** Current navigation history state from the extension */
+let currentNavHistory: NavigationHistoryState | null = null;
 /** Auto-incrementing counter for unique mermaid diagram IDs */
 let _mermaidIdCounter = 0;
+/** Whether the dependency graph view is currently showing */
+let _showingGraph = false;
+/** The current graph Mermaid source to render */
+let _graphMermaidSource = '';
+/** Graph metadata for the header */
+let _graphNodeCount = 0;
+let _graphEdgeCount = 0;
 
 function log(msg: string): void {
   console.log(`[CE] ${msg}`);
@@ -84,11 +121,12 @@ function init(): void {
   });
 
   // Restore persisted state if available (avoids flash of empty on re-show)
-  const saved = vscode.getState() as { tabs: Tab[]; activeTabId: string | null } | null;
+  const saved = vscode.getState() as { tabs: Tab[]; activeTabId: string | null; navigationHistory?: NavigationHistoryState } | null;
   if (saved && saved.tabs) {
     currentTabs = saved.tabs;
     currentActiveTabId = saved.activeTabId;
-    log(`restored saved state: ${currentTabs.length} tabs`);
+    currentNavHistory = saved.navigationHistory || null;
+    log(`restored saved state: ${currentTabs.length} tabs, history=${currentNavHistory?.entries.length ?? 0} entries`);
   }
 
   render();
@@ -98,9 +136,21 @@ function init(): void {
     if (msg.type === 'setState') {
       currentTabs = msg.tabs || [];
       currentActiveTabId = msg.activeTabId;
-      log(`setState: ${currentTabs.length} tabs, active=${currentActiveTabId}`);
+      currentNavHistory = msg.navigationHistory || null;
+      log(`setState: ${currentTabs.length} tabs, active=${currentActiveTabId}, history=${currentNavHistory?.entries.length ?? 0} entries`);
       // Persist for webview re-creation
-      vscode.setState({ tabs: currentTabs, activeTabId: currentActiveTabId });
+      vscode.setState({ tabs: currentTabs, activeTabId: currentActiveTabId, navigationHistory: currentNavHistory });
+      // If a graph is showing and tabs come in, keep showing tabs
+      if (_showingGraph) {
+        _showingGraph = false;
+      }
+      render();
+    } else if (msg.type === 'showDependencyGraph') {
+      log(`showDependencyGraph: ${msg.nodeCount} nodes, ${msg.edgeCount} edges`);
+      _showingGraph = true;
+      _graphMermaidSource = msg.mermaidSource || '';
+      _graphNodeCount = msg.nodeCount || 0;
+      _graphEdgeCount = msg.edgeCount || 0;
       render();
     }
   });
@@ -119,6 +169,14 @@ function render(): void {
     return;
   }
 
+  // Dependency graph view mode
+  if (_showingGraph) {
+    root.innerHTML = _renderGraphView();
+    _attachGraphListeners();
+    _renderGraphDiagram();
+    return;
+  }
+
   if (currentTabs.length === 0) {
     root.innerHTML = renderEmpty();
     return;
@@ -126,7 +184,7 @@ function render(): void {
 
   const activeTab = currentTabs.find((t) => t.id === currentActiveTabId) || currentTabs[0];
 
-  root.innerHTML = renderTabBar() + renderContent(activeTab);
+  root.innerHTML = renderTabBar() + renderBreadcrumbBar() + renderContent(activeTab);
   attachListeners();
   renderMermaidDiagrams();
 }
@@ -190,6 +248,65 @@ function renderTabBar(): string {
     .join('');
 
   return `<div class="tab-bar">${tabs}</div>`;
+}
+
+/**
+ * Render the breadcrumb trail and navigation controls.
+ */
+function renderBreadcrumbBar(): string {
+  if (!currentNavHistory || currentNavHistory.entries.length === 0) {
+    return '';
+  }
+  const { entries, currentIndex, pinnedInvestigations } = currentNavHistory;
+  const trail = _buildBreadcrumbTrail(entries, currentIndex);
+  if (trail.length === 0) {
+    return '';
+  }
+  const canGoBack = currentIndex > 0;
+  const canGoForward = currentIndex < entries.length - 1;
+  const backBtn = `<button class="breadcrumb-nav__btn${canGoBack ? '' : ' breadcrumb-nav__btn--disabled'}" id="history-back" title="Go back"${canGoBack ? '' : ' disabled'}>\u2190</button>`;
+  const forwardBtn = `<button class="breadcrumb-nav__btn${canGoForward ? '' : ' breadcrumb-nav__btn--disabled'}" id="history-forward" title="Go forward"${canGoForward ? '' : ' disabled'}>\u2192</button>`;
+  const crumbs = trail
+    .map((entry, i) => {
+      const isActive = entry.toTabId === currentActiveTabId;
+      const icon = kindIcon(entry.symbolKind);
+      const activeClass = isActive ? ' breadcrumb-item--active' : '';
+      return `<span class="breadcrumb-item${activeClass}" data-tab-id="${entry.toTabId}" title="${esc(entry.symbolName)} (${esc(entry.trigger)})"><span class="breadcrumb-item__icon">${icon}</span><span class="breadcrumb-item__name">${esc(entry.symbolName)}</span></span>${i < trail.length - 1 ? '<span class="breadcrumb-separator">\u203A</span>' : ''}`;
+    })
+    .join('');
+  const pinBtn = trail.length > 1
+    ? '<button class="breadcrumb-nav__btn breadcrumb-nav__pin" id="pin-investigation" title="Pin this investigation trail">\uD83D\uDCCC</button>'
+    : '';
+  const investigationsList = pinnedInvestigations.length > 0
+    ? _renderPinnedInvestigations(pinnedInvestigations)
+    : '';
+  return `<div class="breadcrumb-bar"><div class="breadcrumb-nav">${backBtn}${forwardBtn}<div class="breadcrumb-trail">${crumbs}</div>${pinBtn}</div>${investigationsList}</div>`;
+}
+
+function _buildBreadcrumbTrail(entries: NavigationEntry[], currentIndex: number): NavigationEntry[] {
+  const trail: NavigationEntry[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i <= currentIndex && i < entries.length; i++) {
+    const entry = entries[i];
+    if (!seen.has(entry.toTabId)) {
+      seen.add(entry.toTabId);
+      trail.push(entry);
+    }
+  }
+  return trail;
+}
+
+function _renderPinnedInvestigations(investigations: PinnedInvestigation[]): string {
+  const items = investigations
+    .map((inv) => {
+      const trailPreview = inv.trailSymbols
+        .map((ts) => `${kindIcon(ts.symbolKind)} ${esc(ts.symbolName)}`)
+        .join(' \u203A ');
+      const time = new Date(inv.pinnedAt).toLocaleDateString();
+      return `<div class="pinned-investigation" data-investigation-id="${inv.id}"><div class="pinned-investigation__header"><span class="pinned-investigation__name" title="${esc(inv.name)}">${esc(inv.name)}</span><span class="pinned-investigation__time">${esc(time)}</span><button class="pinned-investigation__restore" data-restore-id="${inv.id}" title="Restore">\u2197</button><button class="pinned-investigation__remove" data-unpin-id="${inv.id}" title="Remove">\u00D7</button></div><div class="pinned-investigation__trail">${trailPreview}</div></div>`;
+    })
+    .join('');
+  return `<details class="pinned-investigations-section"><summary class="pinned-investigations__toggle">\uD83D\uDCCC Investigations (${investigations.length})</summary><div class="pinned-investigations__list">${items}</div></details>`;
 }
 
 function renderContent(tab: Tab): string {
@@ -318,16 +435,57 @@ function _buildKnownSymbols(analysis: any): KnownSymbol[] {
   }
 
   // Class members — the member names themselves (within the current file)
-  if (analysis.classMembers && analysis.symbol?.filePath) {
+  if (analysis.classMembers) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const m of analysis.classMembers as any[]) {
-      if (m.line) {
-        add({
-          name: m.name,
-          filePath: analysis.symbol.filePath,
-          line: m.line,
-          kind: m.memberKind === 'method' ? 'method' : 'property',
-        });
+      // Add the member name — even without a line number it can be explored
+      add({
+        name: m.name,
+        filePath: analysis.symbol?.filePath,
+        line: m.line,
+        kind: m.memberKind === 'method' ? 'method' : 'property',
+      });
+      // Extract individual type names from the member's typeName.
+      // Handles generic types like "Map<string, AnalysisResult>" by splitting
+      // on non-identifier characters and adding each component type.
+      if (m.typeName) {
+        for (const typePart of _extractTypeNames(m.typeName)) {
+          add({ name: typePart, kind: 'type' });
+        }
+      }
+    }
+  }
+
+  // Member access patterns — readBy/writtenBy method names
+  if (analysis.memberAccess) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const ma of analysis.memberAccess as any[]) {
+      add({
+        name: ma.memberName,
+        filePath: analysis.symbol?.filePath,
+        kind: 'property',
+      });
+      if (ma.readBy) {
+        for (const r of ma.readBy as string[]) {
+          add({ name: r, filePath: analysis.symbol?.filePath, kind: 'method' });
+        }
+      }
+      if (ma.writtenBy) {
+        for (const w of ma.writtenBy as string[]) {
+          add({ name: w, filePath: analysis.symbol?.filePath, kind: 'method' });
+        }
+      }
+    }
+  }
+
+  // Data flow — extract symbol-like names from descriptions
+  if (analysis.dataFlow) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const df of analysis.dataFlow as any[]) {
+      if (df.description) {
+        for (const typePart of _extractTypeNames(df.description)) {
+          add({ name: typePart, filePath: df.filePath, line: df.line, kind: 'variable' });
+        }
       }
     }
   }
@@ -336,6 +494,120 @@ function _buildKnownSymbols(analysis: any): KnownSymbol[] {
   symbols.sort((a, b) => b.name.length - a.name.length);
 
   return symbols;
+}
+
+/**
+ * Extract individual type/symbol names from a type expression string.
+ * Handles generics like "Map<string, AnalysisResult>", union types like
+ * "string | number", array types like "SymbolInfo[]", and callable types
+ * like "(symbol: SymbolInfo) => Promise<AnalysisResult>".
+ *
+ * Returns names that are at least 3 chars, start with uppercase (likely
+ * user-defined types), and are not common built-in names.
+ */
+function _extractTypeNames(typeExpr: string): string[] {
+  if (!typeExpr) {
+    return [];
+  }
+
+  // Built-in type names to skip — these are language primitives, not explorable symbols
+  const builtins = new Set([
+    'string',
+    'number',
+    'boolean',
+    'void',
+    'null',
+    'undefined',
+    'any',
+    'never',
+    'unknown',
+    'object',
+    'symbol',
+    'bigint',
+    'true',
+    'false',
+    'int',
+    'float',
+    'double',
+    'char',
+    'bool',
+    'auto',
+    'Map',
+    'Set',
+    'Array',
+    'Record',
+    'Promise',
+    'Partial',
+    'Required',
+    'Readonly',
+    'Pick',
+    'Omit',
+    'Exclude',
+    'Extract',
+    'NonNullable',
+    'ReturnType',
+    'Parameters',
+    'ConstructorParameters',
+    'InstanceType',
+    'ThisType',
+    'Awaited',
+  ]);
+
+  // Split on non-identifier characters and filter to likely user-defined type names
+  const parts = typeExpr.split(/[^a-zA-Z0-9_]+/).filter((part) => {
+    if (!part || part.length < 3) {
+      return false;
+    }
+    if (builtins.has(part)) {
+      return false;
+    }
+    // Must start with uppercase — lowercase names are likely primitives or param names
+    if (!/^[A-Z]/.test(part)) {
+      return false;
+    }
+    return true;
+  });
+
+  return parts;
+}
+
+/**
+ * Render a type expression string with individual type components linked.
+ * Unlike _escAndLink which operates on HTML-escaped text with word boundaries,
+ * this function understands type syntax: it splits a type expression like
+ * "Map<string, AnalysisResult>" into structural tokens and links each
+ * user-defined type component while preserving the surrounding syntax
+ * (angle brackets, commas, pipes, etc.).
+ */
+function _linkTypeExpression(typeExpr: string, knownSymbols: KnownSymbol[]): string {
+  if (!typeExpr) {
+    return '';
+  }
+
+  // Split type expression into identifier tokens and non-identifier separators.
+  // E.g. "Map<string, AnalysisResult>" → ["Map", "<", "string", ", ", "AnalysisResult", ">"]
+  const tokenRegex = /([a-zA-Z_][a-zA-Z0-9_]*)|([^a-zA-Z0-9_]+)/g;
+  let match: RegExpExecArray | null;
+  const parts: string[] = [];
+
+  while ((match = tokenRegex.exec(typeExpr)) !== null) {
+    const identifier = match[1];
+    const separator = match[2];
+
+    if (identifier) {
+      // Check if this identifier is a known symbol
+      const sym = knownSymbols.find((s) => s.name === identifier);
+      if (sym) {
+        parts.push(_symbolExploreLink(sym.name, sym.filePath, sym.line, sym.kind));
+      } else {
+        parts.push(esc(identifier));
+      }
+    } else if (separator) {
+      parts.push(esc(separator));
+    }
+  }
+
+  return parts.join('');
 }
 
 /**
@@ -505,13 +777,22 @@ function renderAnalysis(tab: Tab): string {
     ${fileBreadcrumb}
   </div>`);
 
-  // Enhance button
-  sections.push(`<div class="enhance-bar">
+  // Enhance button — show loading state when enhancing
+  if (tab.enhancing) {
+    sections.push(`<div class="enhance-bar">
+    <button class="enhance-bar__button enhance-bar__button--enhancing" data-tab-id="${tab.id}" disabled>
+      <span class="enhance-bar__spinner"></span>
+      <span class="enhance-bar__label">Enhancing\u2026</span>
+    </button>
+  </div>`);
+  } else {
+    sections.push(`<div class="enhance-bar">
     <button class="enhance-bar__button" data-tab-id="${tab.id}">
       <span class="enhance-bar__icon">✨</span>
       <span class="enhance-bar__label">Enhance</span>
     </button>
   </div>`);
+  }
 
   // LLM badge
   if (a.metadata?.llmProvider) {
@@ -617,7 +898,7 @@ function renderAnalysis(tab: Tab): string {
           : '';
         const typeHtml = p.typeFilePath
           ? `<a class="symbol-link" href="#"${typeLinkAttrs}>${esc(p.typeName)}</a>`
-          : `<code>${esc(p.typeName)}</code>`;
+          : `<code>${_linkTypeExpression(p.typeName, ks)}</code>`;
         const mutatedBadge = p.mutated
           ? `<span class="badge badge--mutated" title="${esc(p.mutationDetail || 'Mutates this parameter')}">⚡ mutated</span>`
           : '<span class="badge badge--readonly">readonly</span>';
@@ -649,7 +930,7 @@ function renderAnalysis(tab: Tab): string {
       : '';
     const typeHtml = out.typeFilePath
       ? `<a class="symbol-link" href="#"${typeLinkAttrs}>${esc(out.typeName)}</a>`
-      : `<code>${esc(out.typeName)}</code>`;
+      : `<code>${_linkTypeExpression(out.typeName, ks)}</code>`;
     const content = `<div class="fn-output-item">
       <div class="fn-output-item__header">
         <span class="fn-output-item__label">Returns:</span>
@@ -670,13 +951,12 @@ function renderAnalysis(tab: Tab): string {
           ? '<span class="badge badge--static-member">static</span>'
           : '';
         const visBadge = `<span class="badge badge--visibility badge--vis-${esc(m.visibility || 'public')}">${esc(m.visibility || 'public')}</span>`;
-        // Member name is clickable — navigates to its line in the source file
-        const memberNameHtml =
-          m.line && tab.symbol.filePath
-            ? `<a class="symbol-link" href="#" data-symbol-name="${esc(m.name)}" data-symbol-file="${esc(tab.symbol.filePath)}" data-symbol-line="${m.line}" data-symbol-kind="${esc(m.memberKind === 'method' ? 'method' : 'property')}">${esc(m.name)}</a>`
-            : `<span>${esc(m.name)}</span>`;
-        // Type name is auto-linked if it matches a known symbol
-        const typeHtml = m.typeName ? _escAndLink(m.typeName, ks) : '';
+        // Member name is clickable — explores the member symbol
+        const memberNameHtml = tab.symbol.filePath
+          ? `<a class="symbol-link" href="#" data-symbol-name="${esc(m.name)}" data-symbol-file="${esc(tab.symbol.filePath)}" data-symbol-line="${m.line || 0}" data-symbol-kind="${esc(m.memberKind === 'method' ? 'method' : 'property')}">${esc(m.name)}</a>`
+          : `<span>${esc(m.name)}</span>`;
+        // Type name — auto-link individual type components (handles generics like Map<string, AnalysisResult>)
+        const typeHtml = m.typeName ? _linkTypeExpression(m.typeName, ks) : '';
         return `<div class="class-member-item">
         <div class="class-member-item__header">
           <span class="class-member-item__kind">${memberKindIcon(m.memberKind)}</span>
@@ -998,6 +1278,8 @@ function attachListeners(): void {
     });
   });
 
+  // Symbol links navigate to the code location instead of triggering LLM analysis.
+  // The user can then manually trigger analysis from the code location if desired.
   document.querySelectorAll('.symbol-link').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.preventDefault();
@@ -1005,14 +1287,27 @@ function attachListeners(): void {
       const symbolName = link.dataset.symbolName;
       const filePath = link.dataset.symbolFile;
       const line = parseInt(link.dataset.symbolLine || '0', 10);
-      const kind = link.dataset.symbolKind || 'function';
-      if (symbolName) {
+      if (symbolName && filePath && line > 0) {
+        // Navigate directly to the exact file:line location
         vscode.postMessage({
-          type: 'exploreSymbol',
-          symbolName,
+          type: 'navigateToSource',
           filePath,
-          line: line || undefined,
-          kind,
+          line,
+          character: 0,
+        });
+      } else if (symbolName && filePath) {
+        // Have file but no line — navigate to file line 1
+        vscode.postMessage({
+          type: 'navigateToSource',
+          filePath,
+          line: 1,
+          character: 0,
+        });
+      } else if (symbolName) {
+        // No file path — ask the extension to find the symbol and navigate there
+        vscode.postMessage({
+          type: 'navigateToSymbol',
+          symbolName,
         });
       }
     });
@@ -1026,6 +1321,61 @@ function attachListeners(): void {
         return;
       }
       _showEnhanceDialog(tabId);
+    });
+  });
+
+  // Breadcrumb bar — back/forward navigation
+  const backBtn = document.getElementById('history-back');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'historyBack' });
+    });
+  }
+
+  const forwardBtn = document.getElementById('history-forward');
+  if (forwardBtn) {
+    forwardBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'historyForward' });
+    });
+  }
+
+  // Breadcrumb items — click to activate that tab
+  document.querySelectorAll('.breadcrumb-item').forEach((el) => {
+    el.addEventListener('click', () => {
+      const tabId = (el as HTMLElement).dataset.tabId;
+      if (tabId) {
+        vscode.postMessage({ type: 'tabClicked', tabId });
+      }
+    });
+  });
+
+  // Pin investigation button — shows a dialog to name the investigation
+  const pinBtn = document.getElementById('pin-investigation');
+  if (pinBtn) {
+    pinBtn.addEventListener('click', () => {
+      _showPinInvestigationDialog();
+    });
+  }
+
+  // Pinned investigation restore buttons
+  document.querySelectorAll('.pinned-investigation__restore').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const investigationId = (el as HTMLElement).dataset.restoreId;
+      if (investigationId) {
+        vscode.postMessage({ type: 'restoreInvestigation', investigationId });
+      }
+    });
+  });
+
+  // Pinned investigation remove buttons
+  document.querySelectorAll('.pinned-investigation__remove').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const investigationId = (el as HTMLElement).dataset.unpinId;
+      if (investigationId) {
+        vscode.postMessage({ type: 'unpinInvestigation', investigationId });
+      }
     });
   });
 }
@@ -1116,6 +1466,89 @@ function _showEnhanceDialog(tabId: string): void {
   });
 
   // Close on overlay click (outside dialog)
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      close();
+    }
+  });
+}
+
+// =====================
+// Pin Investigation Dialog
+// =====================
+
+/**
+ * Show a dialog to name and pin the current investigation trail.
+ */
+function _showPinInvestigationDialog(): void {
+  const existing = document.getElementById('pin-dialog-overlay');
+  if (existing) {
+    existing.remove();
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'pin-dialog-overlay';
+  overlay.className = 'enhance-dialog-overlay';
+
+  overlay.innerHTML = `<div class="enhance-dialog">
+    <div class="enhance-dialog__header">
+      <span class="enhance-dialog__title">\uD83D\uDCCC Pin Investigation</span>
+      <button class="enhance-dialog__close" id="pin-dialog-close">\u00D7</button>
+    </div>
+    <div class="enhance-dialog__body">
+      <label class="enhance-dialog__label" for="pin-dialog-input">
+        Name this investigation trail:
+      </label>
+      <input
+        class="enhance-dialog__input"
+        id="pin-dialog-input"
+        type="text"
+        placeholder="e.g., Tracing the cache miss bug"
+      />
+    </div>
+    <div class="enhance-dialog__footer">
+      <button class="enhance-dialog__cancel" id="pin-dialog-cancel">Cancel</button>
+      <button class="enhance-dialog__submit" id="pin-dialog-submit">Pin</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+
+  const input = document.getElementById('pin-dialog-input') as HTMLInputElement;
+  const submitBtn = document.getElementById('pin-dialog-submit') as HTMLButtonElement;
+  const cancelBtn = document.getElementById('pin-dialog-cancel') as HTMLButtonElement;
+  const closeBtn = document.getElementById('pin-dialog-close') as HTMLButtonElement;
+
+  setTimeout(() => input.focus(), 50);
+
+  const close = (): void => {
+    overlay.remove();
+  };
+
+  const submit = (): void => {
+    const name = input.value.trim();
+    if (!name) {
+      input.classList.add('enhance-dialog__input--error');
+      input.focus();
+      return;
+    }
+    log(`pin investigation: "${name}"`);
+    vscode.postMessage({ type: 'pinInvestigation', name });
+    close();
+  };
+
+  submitBtn.addEventListener('click', submit);
+  cancelBtn.addEventListener('click', close);
+  closeBtn.addEventListener('click', close);
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      close();
+    } else if (e.key === 'Enter') {
+      submit();
+    }
+  });
+
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) {
       close();
@@ -1248,7 +1681,259 @@ async function renderMermaidDiagrams(): Promise<void> {
   }
 }
 
-// Initialize
+// =====================
+// Dependency Graph View
+// =====================
+
+/** Current graph zoom/pan state */
+let _graphScale = 1;
+let _graphPanX = 0;
+let _graphPanY = 0;
+let _graphDragging = false;
+let _graphLastX = 0;
+let _graphLastY = 0;
+/** The SVG's original (native) dimensions, captured once after Mermaid render */
+let _graphSvgNativeW = 0;
+let _graphSvgNativeH = 0;
+
+/**
+ * Render the dependency graph view with header, controls, zoom/pan container.
+ */
+function _renderGraphView(): string {
+  const graphId = `graph-${++_mermaidIdCounter}`;
+  return `<div class="graph-view">
+    <div class="graph-view__header">
+      <div class="graph-view__title">
+        <span class="graph-view__icon">\uD83D\uDD17</span>
+        <span>Dependency Graph</span>
+      </div>
+      <div class="graph-view__stats">
+        <span class="badge badge--llm">${_graphNodeCount} symbols</span>
+        <span class="badge badge--static">${_graphEdgeCount} edges</span>
+      </div>
+      <button class="graph-view__close" id="graph-close-btn" title="Close graph">\u00D7</button>
+    </div>
+    <div class="graph-view__toolbar">
+      <button class="graph-view__tool-btn" id="graph-zoom-in" title="Zoom in">+</button>
+      <button class="graph-view__tool-btn" id="graph-zoom-out" title="Zoom out">\u2212</button>
+      <button class="graph-view__tool-btn" id="graph-zoom-fit" title="Fit to view">Fit</button>
+      <button class="graph-view__tool-btn" id="graph-zoom-reset" title="Reset zoom">1:1</button>
+      <span class="graph-view__zoom-label" id="graph-zoom-label">100%</span>
+      <div class="graph-view__toolbar-spacer"></div>
+      <button class="graph-view__tool-btn" id="graph-show-full" title="Show full workspace graph">Full graph</button>
+    </div>
+    <div class="graph-view__legend">
+      <span class="graph-view__legend-item"><span class="graph-view__legend-swatch graph-view__legend-swatch--fn"></span> function</span>
+      <span class="graph-view__legend-item"><span class="graph-view__legend-swatch graph-view__legend-swatch--class"></span> class</span>
+      <span class="graph-view__legend-item"><span class="graph-view__legend-swatch graph-view__legend-swatch--iface"></span> interface</span>
+      <span class="graph-view__legend-item"><span class="graph-view__legend-swatch graph-view__legend-swatch--var"></span> variable</span>
+      <span class="graph-view__legend-item">\u2192 calls</span>
+      <span class="graph-view__legend-item">\u21E2 depends</span>
+    </div>
+    <div class="graph-view__body" id="graph-viewport">
+      ${_graphNodeCount === 0
+        ? '<div class="graph-view__empty">No cached analyses found.<br>Use <kbd>Ctrl+Shift+H</kbd> to analyze symbols first.</div>'
+        : `<div class="graph-view__svg-wrapper" id="graph-svg-wrapper">
+            <div class="diagram-container graph-view__diagram" id="${graphId}" data-mermaid-source="${escAttr(_graphMermaidSource)}">
+              <div class="diagram-loading">Rendering graph\u2026</div>
+            </div>
+          </div>`
+      }
+    </div>
+  </div>`;
+}
+
+/**
+ * Attach event listeners for the graph view — close, zoom, pan, drag.
+ * Zoom/pan operates directly on the SVG viewBox for crisp rendering.
+ */
+function _attachGraphListeners(): void {
+  // Reset zoom state
+  _graphScale = 1;
+  _graphPanX = 0;
+  _graphPanY = 0;
+  _graphSvgNativeW = 0;
+  _graphSvgNativeH = 0;
+
+  const closeBtn = document.getElementById('graph-close-btn');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      _showingGraph = false;
+      vscode.postMessage({ type: 'closeDependencyGraph' });
+      render();
+    });
+  }
+
+  // Zoom buttons
+  const zoomInBtn = document.getElementById('graph-zoom-in');
+  const zoomOutBtn = document.getElementById('graph-zoom-out');
+  const zoomFitBtn = document.getElementById('graph-zoom-fit');
+  const zoomResetBtn = document.getElementById('graph-zoom-reset');
+  const showFullBtn = document.getElementById('graph-show-full');
+
+  if (zoomInBtn) {
+    zoomInBtn.addEventListener('click', () => _graphZoom(1.25));
+  }
+  if (zoomOutBtn) {
+    zoomOutBtn.addEventListener('click', () => _graphZoom(0.8));
+  }
+  if (zoomFitBtn) {
+    zoomFitBtn.addEventListener('click', _graphFitToView);
+  }
+  if (zoomResetBtn) {
+    zoomResetBtn.addEventListener('click', () => {
+      _graphScale = 1;
+      _graphPanX = 0;
+      _graphPanY = 0;
+      _applyGraphTransform();
+    });
+  }
+  if (showFullBtn) {
+    showFullBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'requestDependencyGraph' });
+    });
+  }
+
+  // Mouse wheel zoom on the viewport
+  const viewport = document.getElementById('graph-viewport');
+  if (viewport) {
+    viewport.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      _graphZoom(factor);
+    }, { passive: false });
+
+    // Mouse drag to pan
+    viewport.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) {
+        return;
+      }
+      _graphDragging = true;
+      _graphLastX = e.clientX;
+      _graphLastY = e.clientY;
+      viewport.style.cursor = 'grabbing';
+      e.preventDefault();
+    });
+
+    viewport.addEventListener('mousemove', (e) => {
+      if (!_graphDragging) {
+        return;
+      }
+      const dx = e.clientX - _graphLastX;
+      const dy = e.clientY - _graphLastY;
+      // Pan in viewBox coordinates (inverse of scale)
+      _graphPanX -= dx / _graphScale;
+      _graphPanY -= dy / _graphScale;
+      _graphLastX = e.clientX;
+      _graphLastY = e.clientY;
+      _applyGraphTransform();
+    });
+
+    viewport.addEventListener('mouseup', () => {
+      _graphDragging = false;
+      viewport.style.cursor = 'grab';
+    });
+
+    viewport.addEventListener('mouseleave', () => {
+      _graphDragging = false;
+      viewport.style.cursor = 'grab';
+    });
+  }
+}
+
+/**
+ * Zoom by a multiplicative factor (>1 = zoom in, <1 = zoom out).
+ * Uses multiplicative zooming for consistent feel at all levels.
+ */
+function _graphZoom(factor: number): void {
+  _graphScale = Math.max(0.1, Math.min(10, _graphScale * factor));
+  _applyGraphTransform();
+}
+
+/** Fit the graph SVG into the visible viewport area. */
+function _graphFitToView(): void {
+  const viewport = document.getElementById('graph-viewport');
+  if (!viewport || _graphSvgNativeW === 0 || _graphSvgNativeH === 0) {
+    return;
+  }
+  const vw = viewport.clientWidth;
+  const vh = viewport.clientHeight;
+  if (vw === 0 || vh === 0) {
+    return;
+  }
+  const scaleX = vw / _graphSvgNativeW;
+  const scaleY = vh / _graphSvgNativeH;
+  _graphScale = Math.min(scaleX, scaleY) * 0.95; // 5% padding
+  _graphPanX = 0;
+  _graphPanY = 0;
+  _applyGraphTransform();
+}
+
+/**
+ * Apply the current zoom/pan by manipulating the SVG's viewBox.
+ *
+ * This is the key to crisp rendering: instead of CSS transform: scale()
+ * which rasterizes then stretches (blurry), we change the SVG viewBox
+ * so the browser re-renders the vector graphics at the correct resolution.
+ */
+function _applyGraphTransform(): void {
+  const wrapper = document.getElementById('graph-svg-wrapper');
+  const svg = wrapper?.querySelector('svg');
+  if (!svg || _graphSvgNativeW === 0) {
+    return;
+  }
+
+  // viewBox dimensions = native size / scale (zooming in = smaller viewBox = bigger content)
+  const vbW = _graphSvgNativeW / _graphScale;
+  const vbH = _graphSvgNativeH / _graphScale;
+  // viewBox origin = pan offset (clamped)
+  const vbX = _graphPanX;
+  const vbY = _graphPanY;
+
+  svg.setAttribute('viewBox', `${vbX} ${vbY} ${vbW} ${vbH}`);
+
+  // Make the SVG fill the viewport
+  const viewport = document.getElementById('graph-viewport');
+  if (viewport) {
+    svg.setAttribute('width', `${viewport.clientWidth}`);
+    svg.setAttribute('height', `${viewport.clientHeight}`);
+  }
+
+  const label = document.getElementById('graph-zoom-label');
+  if (label) {
+    label.textContent = `${Math.round(_graphScale * 100)}%`;
+  }
+}
+
+/**
+ * Render the Mermaid diagram in the graph view container,
+ * capture native SVG dimensions, then auto-fit to viewport.
+ */
+async function _renderGraphDiagram(): Promise<void> {
+  await renderMermaidDiagrams();
+  // After rendering, capture the SVG's native dimensions and fit to view
+  setTimeout(() => {
+    const wrapper = document.getElementById('graph-svg-wrapper');
+    const svg = wrapper?.querySelector('svg');
+    if (!svg) {
+      return;
+    }
+    // Capture native dimensions from the rendered SVG
+    // Mermaid sets width/height attributes or we can use getBBox
+    const bbox = (svg as SVGSVGElement).getBBox?.();
+    if (bbox && bbox.width > 0 && bbox.height > 0) {
+      _graphSvgNativeW = bbox.x + bbox.width + bbox.x; // include padding
+      _graphSvgNativeH = bbox.y + bbox.height + bbox.y;
+    } else {
+      _graphSvgNativeW = svg.clientWidth || parseFloat(svg.getAttribute('width') || '800');
+      _graphSvgNativeH = svg.clientHeight || parseFloat(svg.getAttribute('height') || '600');
+    }
+    log(`graph SVG native size: ${_graphSvgNativeW} x ${_graphSvgNativeH}`);
+    _graphFitToView();
+  }, 150);
+}
+
+// Initialize entry point
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {

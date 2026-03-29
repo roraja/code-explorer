@@ -29,6 +29,8 @@
     "onCommand:codeExplorer.exploreSymbol",
     "onCommand:codeExplorer.exploreFileSymbols",
     "onCommand:codeExplorer.installGlobalSkills",
+    "onCommand:codeExplorer.pullAdoContent",
+    "onCommand:codeExplorer.pushAdoContent",
     "onLanguage:typescript",
     "onLanguage:javascript",
     "onLanguage:typescriptreact",
@@ -90,6 +92,18 @@
         "command": "codeExplorer.installGlobalSkills",
         "title": "Install Global Analysis Skills (Claude + Copilot)",
         "category": "Code Explorer"
+      },
+      {
+        "command": "codeExplorer.pullAdoContent",
+        "title": "Pull ADO Content",
+        "category": "Code Explorer",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "codeExplorer.pushAdoContent",
+        "title": "Push ADO Content",
+        "category": "Code Explorer",
+        "icon": "$(cloud-upload)"
       }
     ],
     "menus": {

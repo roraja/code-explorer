@@ -219,9 +219,278 @@ function renderContent(tab: Tab): string {
   return renderAnalysis(tab);
 }
 
+// =====================
+// Auto-Linking Infrastructure
+// =====================
+
+/**
+ * Represents a known symbol extracted from the analysis data.
+ * Used for auto-linking symbol names found in free-text content.
+ */
+interface KnownSymbol {
+  name: string;
+  filePath?: string;
+  line?: number;
+  kind?: string;
+}
+
+/**
+ * Build a dictionary of known symbol names from the analysis data.
+ * These are symbols we can auto-link when they appear in free-text.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _buildKnownSymbols(analysis: any): KnownSymbol[] {
+  const symbols: KnownSymbol[] = [];
+  const seen = new Set<string>();
+
+  const add = (s: KnownSymbol): void => {
+    // Avoid duplicates and very short names (likely false positives like "i", "x")
+    if (!s.name || s.name.length < 3 || seen.has(s.name)) {
+      return;
+    }
+    seen.add(s.name);
+    symbols.push(s);
+  };
+
+  // Sub-functions
+  if (analysis.subFunctions) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const sf of analysis.subFunctions as any[]) {
+      add({ name: sf.name, filePath: sf.filePath, line: sf.line, kind: sf.kind || 'function' });
+    }
+  }
+
+  // Function inputs — parameter type names
+  if (analysis.functionInputs) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const p of analysis.functionInputs as any[]) {
+      if (p.typeFilePath) {
+        add({
+          name: p.typeName,
+          filePath: p.typeFilePath,
+          line: p.typeLine,
+          kind: p.typeKind || 'type',
+        });
+      }
+    }
+  }
+
+  // Function output — return type name
+  if (analysis.functionOutput?.typeFilePath) {
+    const out = analysis.functionOutput;
+    add({
+      name: out.typeName,
+      filePath: out.typeFilePath,
+      line: out.typeLine,
+      kind: out.typeKind || 'type',
+    });
+  }
+
+  // Call stack callers
+  if (analysis.callStacks) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const cs of analysis.callStacks as any[]) {
+      if (cs.caller) {
+        add({
+          name: cs.caller.name,
+          filePath: cs.caller.filePath,
+          line: cs.caller.line,
+          kind: cs.caller.kind || 'function',
+        });
+      }
+    }
+  }
+
+  // Relationships targets
+  if (analysis.relationships) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const r of analysis.relationships as any[]) {
+      add({ name: r.targetName, filePath: r.targetFilePath, line: r.targetLine, kind: 'unknown' });
+    }
+  }
+
+  // Related symbols (pre-cached)
+  if (analysis.relatedSymbols) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const rs of analysis.relatedSymbols as any[]) {
+      add({ name: rs.name, filePath: rs.filePath, line: rs.line, kind: rs.kind || 'unknown' });
+    }
+  }
+
+  // Class members — the member names themselves (within the current file)
+  if (analysis.classMembers && analysis.symbol?.filePath) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const m of analysis.classMembers as any[]) {
+      if (m.line) {
+        add({
+          name: m.name,
+          filePath: analysis.symbol.filePath,
+          line: m.line,
+          kind: m.memberKind === 'method' ? 'method' : 'property',
+        });
+      }
+    }
+  }
+
+  // Sort by name length descending so longer names match first (avoids partial matches)
+  symbols.sort((a, b) => b.name.length - a.name.length);
+
+  return symbols;
+}
+
+/**
+ * Auto-link known symbol names found in free-text content.
+ * Scans `escapedText` for occurrences of known symbol names and wraps them
+ * in `<a class="symbol-link">` tags that trigger `exploreSymbol`.
+ *
+ * The text must already be HTML-escaped before calling this.
+ */
+function _autoLinkSymbols(escapedText: string, knownSymbols: KnownSymbol[]): string {
+  if (!escapedText || knownSymbols.length === 0) {
+    return escapedText;
+  }
+
+  // Track which ranges have been replaced to avoid overlapping matches
+  const replacements: { start: number; end: number; html: string }[] = [];
+
+  for (const sym of knownSymbols) {
+    const escapedName = esc(sym.name);
+    if (!escapedName) {
+      continue;
+    }
+
+    // Match the escaped name surrounded by non-identifier characters (word boundary)
+    const pattern = new RegExp(
+      `(?<![a-zA-Z0-9_])${escapedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-zA-Z0-9_(])`,
+      'g'
+    );
+
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(escapedText)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+
+      // Check this range doesn't overlap with any existing replacement
+      const overlaps = replacements.some(
+        (r) => (start >= r.start && start < r.end) || (end > r.start && end <= r.end)
+      );
+      if (overlaps) {
+        continue;
+      }
+
+      const linkAttrs = sym.filePath
+        ? ` data-symbol-name="${esc(sym.name)}" data-symbol-file="${esc(sym.filePath)}" data-symbol-line="${sym.line || 0}" data-symbol-kind="${esc(sym.kind || 'function')}"`
+        : ` data-symbol-name="${esc(sym.name)}" data-symbol-kind="${esc(sym.kind || 'function')}"`;
+
+      const linkHtml = `<a class="symbol-link" href="#"${linkAttrs}>${escapedName}</a>`;
+      replacements.push({ start, end, html: linkHtml });
+    }
+  }
+
+  if (replacements.length === 0) {
+    return escapedText;
+  }
+
+  // Apply replacements in reverse order so indices remain valid
+  replacements.sort((a, b) => b.start - a.start);
+  let result = escapedText;
+  for (const r of replacements) {
+    result = result.substring(0, r.start) + r.html + result.substring(r.end);
+  }
+
+  return result;
+}
+
+/**
+ * Escape text and then auto-link any known symbol names found within it.
+ */
+function _escAndLink(text: string, knownSymbols: KnownSymbol[]): string {
+  return _autoLinkSymbols(esc(text), knownSymbols);
+}
+
+/**
+ * Render markdown-like text that may contain ```mermaid fenced blocks.
+ *
+ * Splits the text on ```mermaid ... ``` boundaries. Non-mermaid parts
+ * are escaped + auto-linked as normal. Mermaid parts are emitted as
+ * `<div class="diagram-container" data-mermaid-source="...">` placeholders
+ * that `renderMermaidDiagrams()` will pick up after the DOM update.
+ *
+ * Also handles generic ``` code blocks (non-mermaid) by rendering them
+ * as styled `<pre><code>` blocks.
+ */
+function _renderMarkdownWithMermaid(text: string, knownSymbols: KnownSymbol[]): string {
+  if (!text) {
+    return '';
+  }
+
+  // Regex matches ```mermaid\n...\n``` and generic ```lang\n...\n``` blocks
+  const fencedBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
+  const parts: string[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = fencedBlockRegex.exec(text)) !== null) {
+    // Add the text before this fenced block (escaped + auto-linked)
+    if (match.index > lastIndex) {
+      const before = text.substring(lastIndex, match.index);
+      parts.push(_renderPlainMarkdown(_escAndLink(before, knownSymbols)));
+    }
+
+    const lang = match[1].toLowerCase();
+    const content = match[2];
+
+    if (lang === 'mermaid') {
+      // Emit a mermaid diagram placeholder
+      const diagramId = `mermaid-inline-${++_mermaidIdCounter}`;
+      parts.push(
+        `<div class="diagram-container" id="${diagramId}" data-mermaid-source="${escAttr(content.trim())}">` +
+          `<div class="diagram-loading">Rendering diagram\u2026</div>` +
+          `</div>`
+      );
+    } else {
+      // Render as a styled code block
+      const langLabel = lang ? ` data-lang="${esc(lang)}"` : '';
+      parts.push(`<pre class="qa-code-block"${langLabel}><code>${esc(content)}</code></pre>`);
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Add any remaining text after the last fenced block
+  if (lastIndex < text.length) {
+    const remaining = text.substring(lastIndex);
+    parts.push(_renderPlainMarkdown(_escAndLink(remaining, knownSymbols)));
+  }
+
+  return parts.join('');
+}
+
+/**
+ * Minimal markdown-to-HTML for already-escaped text.
+ * Converts line breaks to <br> for readability in Q&A answers.
+ */
+function _renderPlainMarkdown(escapedHtml: string): string {
+  return escapedHtml.replace(/\n/g, '<br>');
+}
+
+/**
+ * Render a symbol name as a clickable explore link (for structured data
+ * where we know the symbol info directly, not via text scanning).
+ */
+function _symbolExploreLink(name: string, filePath?: string, line?: number, kind?: string): string {
+  const linkAttrs = filePath
+    ? ` data-symbol-name="${esc(name)}" data-symbol-file="${esc(filePath)}" data-symbol-line="${line || 0}" data-symbol-kind="${esc(kind || 'function')}"`
+    : ` data-symbol-name="${esc(name)}" data-symbol-kind="${esc(kind || 'function')}"`;
+  return `<a class="symbol-link" href="#"${linkAttrs}>${esc(name)}</a>`;
+}
+
 function renderAnalysis(tab: Tab): string {
   const a = tab.analysis;
   const sections: string[] = [];
+
+  // Build the known symbols dictionary for auto-linking free text
+  const ks = _buildKnownSymbols(a);
 
   // Header with file breadcrumb (clickable — navigates to the symbol's position)
   const fileBreadcrumb = tab.symbol.filePath
@@ -255,7 +524,12 @@ function renderAnalysis(tab: Tab): string {
 
   // Overview
   if (a.overview) {
-    sections.push(renderSection('Overview', `<p class="overview-text">${esc(a.overview)}</p>`));
+    sections.push(
+      renderSection(
+        'Overview',
+        `<p class="overview-text">${_renderMarkdownWithMermaid(a.overview, ks)}</p>`
+      )
+    );
   }
 
   // Data Kind (for variables — what kind of data this variable holds)
@@ -267,7 +541,7 @@ function renderAnalysis(tab: Tab): string {
       `<div class="data-kind-item__label"><span class="badge badge--data-kind">📦 ${esc(dk.label)}</span></div>`
     );
     if (dk.description) {
-      parts.push(`<div class="data-kind-item__desc">${esc(dk.description)}</div>`);
+      parts.push(`<div class="data-kind-item__desc">${_escAndLink(dk.description, ks)}</div>`);
     }
     if (dk.examples && dk.examples.length > 0) {
       parts.push(`<div class="data-kind-item__section-label">Examples:</div>`);
@@ -281,7 +555,7 @@ function renderAnalysis(tab: Tab): string {
       parts.push(`<div class="data-kind-item__section-label">References:</div>`);
       parts.push(`<ul class="data-kind-item__list">`);
       for (const ref of dk.references) {
-        parts.push(`<li>${esc(ref)}</li>`);
+        parts.push(`<li>${_escAndLink(ref, ks)}</li>`);
       }
       parts.push(`</ul>`);
     }
@@ -295,7 +569,7 @@ function renderAnalysis(tab: Tab): string {
       .map(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (s: any) =>
-          `<li class="step-item"><span class="step-item__number">${s.step}.</span> ${esc(s.description)}</li>`
+          `<li class="step-item"><span class="step-item__number">${s.step}.</span> ${_escAndLink(s.description, ks)}</li>`
       )
       .join('');
     sections.push(renderSection('Step-by-Step Breakdown', `<ol class="step-list">${items}</ol>`));
@@ -314,12 +588,12 @@ function renderAnalysis(tab: Tab): string {
           : `<strong>${esc(sf.name)}</strong>`;
         return `<div class="subfunction-item">
         <div class="subfunction-item__header">${nameHtml}</div>
-        <div class="subfunction-item__desc">${esc(sf.description)}</div>
+        <div class="subfunction-item__desc">${_escAndLink(sf.description, ks)}</div>
         <div class="subfunction-item__io">
-          <span class="subfunction-item__label">Input:</span> <span>${esc(sf.input)}</span>
+          <span class="subfunction-item__label">Input:</span> <span>${_escAndLink(sf.input, ks)}</span>
         </div>
         <div class="subfunction-item__io">
-          <span class="subfunction-item__label">Output:</span> <span>${esc(sf.output)}</span>
+          <span class="subfunction-item__label">Output:</span> <span>${_escAndLink(sf.output, ks)}</span>
         </div>
         ${sf.filePath ? `<a class="subfunction-item__file file-link" href="#" data-file="${esc(sf.filePath)}" data-line="${sf.line || 1}" data-char="0">${esc(shortPath(sf.filePath))}${sf.line ? ':' + sf.line : ''}</a>` : ''}
       </div>`;
@@ -353,9 +627,9 @@ function renderAnalysis(tab: Tab): string {
           <span class="fn-param-item__type">${typeHtml}</span>
           ${mutatedBadge}
         </div>
-        <div class="fn-param-item__desc">${esc(p.description)}</div>
-        ${p.mutated && p.mutationDetail ? `<div class="fn-param-item__mutation">⚡ ${esc(p.mutationDetail)}</div>` : ''}
-        ${p.typeOverview ? `<div class="fn-param-item__type-overview">${esc(p.typeOverview)}</div>` : ''}
+        <div class="fn-param-item__desc">${_escAndLink(p.description, ks)}</div>
+        ${p.mutated && p.mutationDetail ? `<div class="fn-param-item__mutation">⚡ ${_escAndLink(p.mutationDetail, ks)}</div>` : ''}
+        ${p.typeOverview ? `<div class="fn-param-item__type-overview">${_escAndLink(p.typeOverview, ks)}</div>` : ''}
       </div>`;
       })
       .join('');
@@ -381,8 +655,8 @@ function renderAnalysis(tab: Tab): string {
         <span class="fn-output-item__label">Returns:</span>
         <span class="fn-output-item__type">${typeHtml}</span>
       </div>
-      <div class="fn-output-item__desc">${esc(out.description)}</div>
-      ${out.typeOverview ? `<div class="fn-output-item__type-overview">${esc(out.typeOverview)}</div>` : ''}
+      <div class="fn-output-item__desc">${_escAndLink(out.description, ks)}</div>
+      ${out.typeOverview ? `<div class="fn-output-item__type-overview">${_escAndLink(out.typeOverview, ks)}</div>` : ''}
     </div>`;
     sections.push(renderSection('Function Output', content));
   }
@@ -396,14 +670,21 @@ function renderAnalysis(tab: Tab): string {
           ? '<span class="badge badge--static-member">static</span>'
           : '';
         const visBadge = `<span class="badge badge--visibility badge--vis-${esc(m.visibility || 'public')}">${esc(m.visibility || 'public')}</span>`;
+        // Member name is clickable — navigates to its line in the source file
+        const memberNameHtml =
+          m.line && tab.symbol.filePath
+            ? `<a class="symbol-link" href="#" data-symbol-name="${esc(m.name)}" data-symbol-file="${esc(tab.symbol.filePath)}" data-symbol-line="${m.line}" data-symbol-kind="${esc(m.memberKind === 'method' ? 'method' : 'property')}">${esc(m.name)}</a>`
+            : `<span>${esc(m.name)}</span>`;
+        // Type name is auto-linked if it matches a known symbol
+        const typeHtml = m.typeName ? _escAndLink(m.typeName, ks) : '';
         return `<div class="class-member-item">
         <div class="class-member-item__header">
           <span class="class-member-item__kind">${memberKindIcon(m.memberKind)}</span>
-          <span class="class-member-item__name">${esc(m.name)}</span>
-          <code class="class-member-item__type">${esc(m.typeName || '')}</code>
+          <span class="class-member-item__name">${memberNameHtml}</span>
+          <code class="class-member-item__type">${typeHtml}</code>
           ${visBadge}${staticBadge}
         </div>
-        <div class="class-member-item__desc">${esc(m.description || '')}</div>
+        <div class="class-member-item__desc">${_escAndLink(m.description || '', ks)}</div>
       </div>`;
       })
       .join('');
@@ -423,17 +704,35 @@ function renderAnalysis(tab: Tab): string {
         const externalBadge = ma.externalAccess
           ? '<span class="badge badge--external">external</span>'
           : '';
-        const readers = (ma.readBy || []).join(', ') || 'none';
-        const writers = (ma.writtenBy || []).join(', ') || 'none';
+        // Render readBy and writtenBy as individual symbol links
+        const readersHtml =
+          (ma.readBy || []).length > 0
+            ? (ma.readBy as string[])
+                .map((r: string) => _symbolExploreLink(r, tab.symbol.filePath, undefined, 'method'))
+                .join(', ')
+            : 'none';
+        const writersHtml =
+          (ma.writtenBy || []).length > 0
+            ? (ma.writtenBy as string[])
+                .map((w: string) => _symbolExploreLink(w, tab.symbol.filePath, undefined, 'method'))
+                .join(', ')
+            : 'none';
+        // Member name itself is an explore link
+        const memberNameHtml = _symbolExploreLink(
+          ma.memberName,
+          tab.symbol.filePath,
+          undefined,
+          'property'
+        );
         return `<div class="member-access-item">
         <div class="member-access-item__header">
-          <strong>${esc(ma.memberName)}</strong> ${externalBadge}
+          <strong>${memberNameHtml}</strong> ${externalBadge}
         </div>
         <div class="member-access-item__row">
-          <span class="member-access-item__label">Read by:</span> <span>${esc(readers)}</span>
+          <span class="member-access-item__label">Read by:</span> <span>${readersHtml}</span>
         </div>
         <div class="member-access-item__row">
-          <span class="member-access-item__label">Written by:</span> <span>${esc(writers)}</span>
+          <span class="member-access-item__label">Written by:</span> <span>${writersHtml}</span>
         </div>
       </div>`;
       })
@@ -449,29 +748,29 @@ function renderAnalysis(tab: Tab): string {
     const parts: string[] = [];
     if (vl.declaration) {
       parts.push(
-        `<div class="lifecycle-item"><span class="lifecycle-item__label">Declaration:</span> ${esc(vl.declaration)}</div>`
+        `<div class="lifecycle-item"><span class="lifecycle-item__label">Declaration:</span> ${_escAndLink(vl.declaration, ks)}</div>`
       );
     }
     if (vl.initialization) {
       parts.push(
-        `<div class="lifecycle-item"><span class="lifecycle-item__label">Initialization:</span> ${esc(vl.initialization)}</div>`
+        `<div class="lifecycle-item"><span class="lifecycle-item__label">Initialization:</span> ${_escAndLink(vl.initialization, ks)}</div>`
       );
     }
     if (vl.mutations && vl.mutations.length > 0) {
-      const muts = vl.mutations.map((m: string) => `<li>${esc(m)}</li>`).join('');
+      const muts = vl.mutations.map((m: string) => `<li>${_escAndLink(m, ks)}</li>`).join('');
       parts.push(
         `<div class="lifecycle-item"><span class="lifecycle-item__label">Mutations:</span><ul class="lifecycle-sublist">${muts}</ul></div>`
       );
     }
     if (vl.consumption && vl.consumption.length > 0) {
-      const cons = vl.consumption.map((c: string) => `<li>${esc(c)}</li>`).join('');
+      const cons = vl.consumption.map((c: string) => `<li>${_escAndLink(c, ks)}</li>`).join('');
       parts.push(
         `<div class="lifecycle-item"><span class="lifecycle-item__label">Consumption:</span><ul class="lifecycle-sublist">${cons}</ul></div>`
       );
     }
     if (vl.scopeAndLifetime) {
       parts.push(
-        `<div class="lifecycle-item"><span class="lifecycle-item__label">Scope & Lifetime:</span> ${esc(vl.scopeAndLifetime)}</div>`
+        `<div class="lifecycle-item"><span class="lifecycle-item__label">Scope & Lifetime:</span> ${_escAndLink(vl.scopeAndLifetime, ks)}</div>`
       );
     }
     if (parts.length > 0) {
@@ -492,7 +791,7 @@ function renderAnalysis(tab: Tab): string {
           : '';
         return `<div class="data-flow-item">
         <span class="data-flow-item__type">${typeLabel}</span>
-        <span class="data-flow-item__desc">${esc(df.description)}</span>
+        <span class="data-flow-item__desc">${_escAndLink(df.description, ks)}</span>
         ${fileRef}
       </div>`;
       })
@@ -507,7 +806,7 @@ function renderAnalysis(tab: Tab): string {
 
   // Key methods / points
   if (a.keyMethods && a.keyMethods.length > 0) {
-    const items = a.keyMethods.map((m: string) => `<li>${esc(m)}</li>`).join('');
+    const items = a.keyMethods.map((m: string) => `<li>${_escAndLink(m, ks)}</li>`).join('');
     sections.push(renderSection('Key Points', `<ul class="list">${items}</ul>`));
   }
 
@@ -540,7 +839,7 @@ function renderAnalysis(tab: Tab): string {
         return `<li class="callstack-item">
           ${nameHtml}
           <a class="callstack-item__file file-link" href="#" data-file="${esc(c.caller.filePath)}" data-line="${c.caller.line || 1}" data-char="0">${esc(shortPath(c.caller.filePath))}:${c.caller.line}</a>
-          <div class="callstack-item__chain">${esc(chain)}</div>
+          <div class="callstack-item__chain">${_escAndLink(chain, ks)}</div>
         </li>`;
       })
       .join('');
@@ -554,8 +853,15 @@ function renderAnalysis(tab: Tab): string {
     const items = a.relationships
       .map(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (r: any) =>
-          `<li><span class="rel-type">${esc(r.type)}</span> ${esc(r.targetName)} <a class="rel-file file-link" href="#" data-file="${esc(r.targetFilePath)}" data-line="${r.targetLine || 1}" data-char="0">${esc(shortPath(r.targetFilePath))}</a></li>`
+        (r: any) => {
+          const targetLink = _symbolExploreLink(
+            r.targetName,
+            r.targetFilePath,
+            r.targetLine,
+            'unknown'
+          );
+          return `<li><span class="rel-type">${esc(r.type)}</span> ${targetLink} <a class="rel-file file-link" href="#" data-file="${esc(r.targetFilePath)}" data-line="${r.targetLine || 1}" data-char="0">${esc(shortPath(r.targetFilePath))}</a></li>`;
+        }
       )
       .join('');
     sections.push(renderSection('Relationships', `<ul class="list">${items}</ul>`));
@@ -563,18 +869,18 @@ function renderAnalysis(tab: Tab): string {
 
   // Dependencies
   if (a.dependencies && a.dependencies.length > 0) {
-    const items = a.dependencies.map((d: string) => `<li>${esc(d)}</li>`).join('');
+    const items = a.dependencies.map((d: string) => `<li>${_escAndLink(d, ks)}</li>`).join('');
     sections.push(renderSection('Dependencies', `<ul class="list">${items}</ul>`));
   }
 
   // Usage pattern
   if (a.usagePattern) {
-    sections.push(renderSection('Usage Pattern', `<p>${esc(a.usagePattern)}</p>`));
+    sections.push(renderSection('Usage Pattern', `<p>${_escAndLink(a.usagePattern, ks)}</p>`));
   }
 
   // Potential issues
   if (a.potentialIssues && a.potentialIssues.length > 0) {
-    const items = a.potentialIssues.map((i: string) => `<li>⚠ ${esc(i)}</li>`).join('');
+    const items = a.potentialIssues.map((i: string) => `<li>⚠ ${_escAndLink(i, ks)}</li>`).join('');
     sections.push(renderSection('Potential Issues', `<ul class="list">${items}</ul>`));
   }
 
@@ -605,7 +911,7 @@ function renderAnalysis(tab: Tab): string {
             <span class="qa-item__q-text">${esc(qa.question)}</span>
           </div>
           <div class="qa-item__time">${esc(time)}</div>
-          <div class="qa-item__answer">${esc(qa.answer)}</div>
+          <div class="qa-item__answer">${_renderMarkdownWithMermaid(qa.answer, ks)}</div>
         </div>`;
       })
       .join('');

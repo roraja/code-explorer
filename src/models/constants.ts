@@ -21,6 +21,8 @@ export const COMMANDS = {
   CLEAR_CACHE: 'codeExplorer.clearCache',
   ANALYZE_WORKSPACE: 'codeExplorer.analyzeWorkspace',
   INSTALL_GLOBAL_SKILLS: 'codeExplorer.installGlobalSkills',
+  PULL_ADO_CONTENT: 'codeExplorer.pullAdoContent',
+  PUSH_ADO_CONTENT: 'codeExplorer.pushAdoContent',
 } as const;
 
 /** Configuration setting keys (under "codeExplorer." namespace). */

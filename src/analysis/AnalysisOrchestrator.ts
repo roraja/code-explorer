@@ -879,7 +879,9 @@ export class AnalysisOrchestrator {
     const startTime = Date.now();
     const symbol = existingResult.symbol;
     const symbolKey = `${symbol.kind} "${symbol.name}" in ${symbol.filePath}`;
-    logger.info(`Orchestrator.enhanceAnalysis: ${symbolKey} — prompt: "${userPrompt.substring(0, 100)}"`);
+    logger.info(
+      `Orchestrator.enhanceAnalysis: ${symbolKey} — prompt: "${userPrompt.substring(0, 100)}"`
+    );
 
     // Start LLM call log
     logger.startLLMCallLog(`enhance:${symbol.name}`, this._llmProvider.name);
@@ -923,12 +925,10 @@ export class AnalysisOrchestrator {
 
     // Build the enhance prompt
     logger.logLLMStep('Building enhance prompt...');
-    const prompt = PromptBuilder.buildEnhance(
-      existingResult,
-      userPrompt,
-      sourceCode
+    const prompt = PromptBuilder.buildEnhance(existingResult, userPrompt, sourceCode);
+    logger.logLLMStep(
+      `Enhance prompt built (${prompt.length} chars), sending to ${this._llmProvider.name}...`
     );
-    logger.logLLMStep(`Enhance prompt built (${prompt.length} chars), sending to ${this._llmProvider.name}...`);
     logger.logLLMInput(prompt);
 
     // Send to LLM

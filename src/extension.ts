@@ -14,6 +14,7 @@ import { CacheStore } from './cache/CacheStore';
 import { LLMProviderFactory } from './llm/LLMProviderFactory';
 import { logger, LogLevel } from './utils/logger';
 import { SkillInstaller } from './skills/SkillInstaller';
+import { pullAdoContent, pushAdoContent } from './git/AdoSync';
 import type { CursorContext } from './models/types';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -294,6 +295,63 @@ export function activate(context: vscode.ExtensionContext): void {
               `Code Explorer: Failed to analyze file. Check the Output panel for details.`
             );
           }
+        }
+      );
+    }),
+
+    vscode.commands.registerCommand(COMMANDS.PULL_ADO_CONTENT, async () => {
+      logger.info('Command: pullAdoContent invoked');
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Code Explorer: Pulling content from ADO...',
+          cancellable: false,
+        },
+        async () => {
+          const result = await pullAdoContent(workspaceRoot);
+
+          if (result.success) {
+            vscode.window.showInformationMessage(`Code Explorer: ${result.message}`);
+          } else {
+            vscode.window.showErrorMessage(`Code Explorer: ${result.message}`);
+          }
+
+          logger.info(`pullAdoContent: ${result.message}`);
+          logger.debug(`pullAdoContent details:\n${result.details}`);
+        }
+      );
+    }),
+
+    vscode.commands.registerCommand(COMMANDS.PUSH_ADO_CONTENT, async () => {
+      logger.info('Command: pushAdoContent invoked');
+
+      const confirm = await vscode.window.showWarningMessage(
+        'Push Code Explorer content to ADO? This will pull latest changes first, then push.',
+        { modal: true },
+        'Push'
+      );
+      if (confirm !== 'Push') {
+        return;
+      }
+
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Code Explorer: Pushing content to ADO...',
+          cancellable: false,
+        },
+        async () => {
+          const result = await pushAdoContent(workspaceRoot);
+
+          if (result.success) {
+            vscode.window.showInformationMessage(`Code Explorer: ${result.message}`);
+          } else {
+            vscode.window.showErrorMessage(`Code Explorer: ${result.message}`);
+          }
+
+          logger.info(`pushAdoContent: ${result.message}`);
+          logger.debug(`pushAdoContent details:\n${result.details}`);
         }
       );
     })

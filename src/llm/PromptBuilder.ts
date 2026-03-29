@@ -578,10 +578,14 @@ Output a single machine-readable JSON block listing ALL symbol analyses for this
       existingSummary.push(`**Key Points:** ${existingResult.keyMethods.join('; ')}`);
     }
     if (existingResult.functionSteps && existingResult.functionSteps.length > 0) {
-      existingSummary.push(`**Steps:** ${existingResult.functionSteps.map(s => `${s.step}. ${s.description}`).join(' ')}`);
+      existingSummary.push(
+        `**Steps:** ${existingResult.functionSteps.map((s) => `${s.step}. ${s.description}`).join(' ')}`
+      );
     }
     if (existingResult.subFunctions && existingResult.subFunctions.length > 0) {
-      existingSummary.push(`**Sub-Functions:** ${existingResult.subFunctions.map(sf => sf.name).join(', ')}`);
+      existingSummary.push(
+        `**Sub-Functions:** ${existingResult.subFunctions.map((sf) => sf.name).join(', ')}`
+      );
     }
     if (existingResult.dependencies && existingResult.dependencies.length > 0) {
       existingSummary.push(`**Dependencies:** ${existingResult.dependencies.join(', ')}`);
@@ -590,7 +594,9 @@ Output a single machine-readable JSON block listing ALL symbol analyses for this
       existingSummary.push(`**Potential Issues:** ${existingResult.potentialIssues.join('; ')}`);
     }
     if (existingResult.classMembers && existingResult.classMembers.length > 0) {
-      existingSummary.push(`**Class Members:** ${existingResult.classMembers.map(m => `${m.visibility} ${m.memberKind} ${m.name}: ${m.typeName}`).join('; ')}`);
+      existingSummary.push(
+        `**Class Members:** ${existingResult.classMembers.map((m) => `${m.visibility} ${m.memberKind} ${m.name}: ${m.typeName}`).join('; ')}`
+      );
     }
 
     // Include previous Q&A for context continuity

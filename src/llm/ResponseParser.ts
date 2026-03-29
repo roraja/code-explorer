@@ -504,7 +504,10 @@ export class ResponseParser {
       // (stripping out any JSON blocks and other sections)
       answer = raw
         .replace(/```json:\w+[\s\S]*?```/g, '')
-        .replace(/^#{1,3}\s+(Updated Overview|Additional Key Points|Additional Issues)[\s\S]*$/gm, '')
+        .replace(
+          /^#{1,3}\s+(Updated Overview|Additional Key Points|Additional Issues)[\s\S]*$/gm,
+          ''
+        )
         .trim();
     }
     // Clean up: remove json blocks from answer
@@ -520,10 +523,14 @@ export class ResponseParser {
       try {
         const parsed = JSON.parse(kpMatch[1]);
         if (Array.isArray(parsed)) {
-          additionalKeyPoints = parsed.filter((s): s is string => typeof s === 'string' && s.length > 0);
+          additionalKeyPoints = parsed.filter(
+            (s): s is string => typeof s === 'string' && s.length > 0
+          );
         }
       } catch (err) {
-        logger.warn(`ResponseParser.parseEnhanceResponse: JSON parse error for additional_key_points: ${err}`);
+        logger.warn(
+          `ResponseParser.parseEnhanceResponse: JSON parse error for additional_key_points: ${err}`
+        );
       }
     }
 
@@ -534,10 +541,14 @@ export class ResponseParser {
       try {
         const parsed = JSON.parse(issueMatch[1]);
         if (Array.isArray(parsed)) {
-          additionalIssues = parsed.filter((s): s is string => typeof s === 'string' && s.length > 0);
+          additionalIssues = parsed.filter(
+            (s): s is string => typeof s === 'string' && s.length > 0
+          );
         }
       } catch (err) {
-        logger.warn(`ResponseParser.parseEnhanceResponse: JSON parse error for additional_issues: ${err}`);
+        logger.warn(
+          `ResponseParser.parseEnhanceResponse: JSON parse error for additional_issues: ${err}`
+        );
       }
     }
 

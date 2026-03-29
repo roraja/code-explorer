@@ -25,6 +25,14 @@ const execFileAsync = promisify(execFile);
 export class CopilotCLIProvider implements LLMProvider {
   readonly name = 'copilot-cli';
 
+  /** Workspace root directory — when set, copilot runs with full workspace context. */
+  private _workspaceRoot?: string;
+
+  /** Set the workspace root so copilot CLI has full workspace context. */
+  setWorkspaceRoot(root: string): void {
+    this._workspaceRoot = root;
+  }
+
   async isAvailable(): Promise<boolean> {
     try {
       await execFileAsync('which', ['copilot']);
@@ -60,6 +68,7 @@ export class CopilotCLIProvider implements LLMProvider {
         command: 'copilot',
         args,
         stdinData: fullPrompt,
+        cwd: this._workspaceRoot,
         label: 'copilot-cli',
         onStdoutChunk: (chunk) => logger.logLLMChunk(chunk),
         onStderrChunk: (chunk) => logger.logLLMChunk(`[stderr] ${chunk}`),

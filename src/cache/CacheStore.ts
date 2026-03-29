@@ -11,7 +11,7 @@
  */
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { AnalysisResult, SymbolInfo, AnalysisMetadata, CallStackEntry, UsageEntry, DataFlowEntry, ClassMemberInfo } from '../models/types';
+import type { AnalysisResult, SymbolInfo, SymbolKindType, AnalysisMetadata, CallStackEntry, UsageEntry, DataFlowEntry, ClassMemberInfo } from '../models/types';
 import { SYMBOL_KIND_PREFIX } from '../models/types';
 import { CACHE, ANALYSIS_VERSION } from '../models/constants';
 import { logger } from '../utils/logger';
@@ -21,6 +21,11 @@ export class CacheStore {
 
   constructor(workspaceRoot: string) {
     this._cacheRoot = path.join(workspaceRoot, '.vscode', CACHE.DIR_NAME);
+  }
+
+  /** Get the absolute path to the cache root directory. */
+  get cacheRoot(): string {
+    return this._cacheRoot;
   }
 
   // ── Clear ───────────────────────────────────────────────
@@ -60,6 +65,161 @@ export class CacheStore {
       logger.debug(`CacheStore.read: MISS for ${symbol.kind} "${symbol.name}"`);
       return null;
     }
+  }
+
+  // ── Fuzzy Cursor Lookup ────────────────────────────────
+
+  /** Tolerance for line-number matching when looking up by cursor (±3 lines). */
+  private static readonly _lineTolerance = 3;
+
+  /**
+   * Search for a cached analysis matching a cursor position.
+   *
+   * Because the cursor-based flow doesn't know the symbol kind or scope
+   * chain up-front, we can't compute the exact cache file path. Instead
+   * we scan the cache directory for the given source file and inspect
+   * every cached `.md` file's YAML frontmatter:
+   *
+   *   1. `symbol` field must match `word` (case-sensitive).
+   *   2. `line` field must be within ±3 lines of `cursorLine`.
+   *
+   * Returns the first matching `{ symbol, result }` or null on miss.
+   */
+  async findByCursor(
+    word: string,
+    filePath: string,
+    cursorLine: number
+  ): Promise<{ symbol: SymbolInfo; result: AnalysisResult } | null> {
+    const cacheDir = path.join(this._cacheRoot, filePath);
+    logger.info(
+      `CacheStore.findByCursor: searching for symbol="${word}" ` +
+        `near line ${cursorLine} in ${cacheDir}`
+    );
+
+    // 1. List all .md files in the source file's cache directory
+    let entries: string[];
+    try {
+      entries = await fs.readdir(cacheDir);
+    } catch {
+      logger.debug(
+        `CacheStore.findByCursor: cache directory does not exist: ${cacheDir}`
+      );
+      return null;
+    }
+
+    const mdFiles = entries.filter((e) => e.endsWith('.md'));
+    logger.debug(
+      `CacheStore.findByCursor: found ${mdFiles.length} cache files in ${cacheDir}: ` +
+        `[${mdFiles.join(', ')}]`
+    );
+
+    if (mdFiles.length === 0) {
+      logger.info('CacheStore.findByCursor: no cache files — MISS');
+      return null;
+    }
+
+    // 2. Scan each file's frontmatter for a matching symbol + line
+    for (const mdFile of mdFiles) {
+      const fullPath = path.join(cacheDir, mdFile);
+      let content: string;
+      try {
+        content = await fs.readFile(fullPath, 'utf-8');
+      } catch (err) {
+        logger.debug(
+          `CacheStore.findByCursor: cannot read ${mdFile}: ${err}`
+        );
+        continue;
+      }
+
+      // Quick-parse just the frontmatter (no full deserialization yet)
+      const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      if (!fmMatch) {
+        logger.debug(
+          `CacheStore.findByCursor: ${mdFile} has no frontmatter — skipping`
+        );
+        continue;
+      }
+
+      const fm = this._parseFrontmatter(fmMatch[1]);
+      const cachedSymbolName = fm['symbol'] || '';
+      const cachedLine = parseInt(fm['line'] || '', 10);
+      const cachedKind = (fm['kind'] || 'unknown') as SymbolKindType;
+      const cachedScopeChain = fm['scope_chain']
+        ? fm['scope_chain'].split('.')
+        : [];
+
+      logger.debug(
+        `CacheStore.findByCursor: checking ${mdFile} — ` +
+          `symbol="${cachedSymbolName}", kind=${cachedKind}, line=${cachedLine}`
+      );
+
+      // Match criteria:
+      //   a) symbol name matches (case-sensitive)
+      //   b) line is within ±LINE_TOLERANCE
+      if (cachedSymbolName !== word) {
+        logger.debug(
+          `CacheStore.findByCursor: ${mdFile} — name mismatch ` +
+            `("${cachedSymbolName}" !== "${word}") — skipping`
+        );
+        continue;
+      }
+
+      if (isNaN(cachedLine)) {
+        logger.debug(
+          `CacheStore.findByCursor: ${mdFile} — line is NaN — skipping`
+        );
+        continue;
+      }
+
+      const lineDelta = Math.abs(cachedLine - cursorLine);
+      if (lineDelta > CacheStore._lineTolerance) {
+        logger.debug(
+          `CacheStore.findByCursor: ${mdFile} — line too far ` +
+            `(cached=${cachedLine}, cursor=${cursorLine}, delta=${lineDelta}, ` +
+            `tolerance=±${CacheStore._lineTolerance}) — skipping`
+        );
+        continue;
+      }
+
+      // 3. Full deserialization — build a SymbolInfo from the frontmatter
+      const symbolInfo: SymbolInfo = {
+        name: cachedSymbolName,
+        kind: cachedKind,
+        filePath,
+        position: { line: cachedLine, character: 0 },
+        containerName: cachedScopeChain.length > 0
+          ? cachedScopeChain[cachedScopeChain.length - 1]
+          : undefined,
+        scopeChain: cachedScopeChain,
+      };
+
+      const result = this._deserialize(content, symbolInfo);
+      if (!result) {
+        logger.debug(
+          `CacheStore.findByCursor: ${mdFile} — deserialization failed — skipping`
+        );
+        continue;
+      }
+
+      const age = Date.now() - new Date(result.metadata.analyzedAt).getTime();
+      const ageHours = Math.round(age / 3600000);
+
+      logger.info(
+        `CacheStore.findByCursor: HIT — matched "${cachedSymbolName}" ` +
+          `(${cachedKind}) at line ${cachedLine} in ${mdFile} ` +
+          `(delta=${lineDelta} lines, ${ageHours}h old, ` +
+          `provider: ${result.metadata.llmProvider || 'static'}, ` +
+          `stale: ${result.metadata.stale})`
+      );
+
+      return { symbol: symbolInfo, result };
+    }
+
+    logger.info(
+      `CacheStore.findByCursor: MISS — scanned ${mdFiles.length} files, ` +
+        `no match for symbol="${word}" near line ${cursorLine}`
+    );
+    return null;
   }
 
   // ── Write ───────────────────────────────────────────────

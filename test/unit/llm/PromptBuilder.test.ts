@@ -10,7 +10,7 @@ import { FunctionPromptStrategy } from '../../../src/llm/prompts/FunctionPromptS
 import { VariablePromptStrategy } from '../../../src/llm/prompts/VariablePromptStrategy';
 import { ClassPromptStrategy } from '../../../src/llm/prompts/ClassPromptStrategy';
 import { PropertyPromptStrategy } from '../../../src/llm/prompts/PropertyPromptStrategy';
-import type { SymbolInfo } from '../../../src/models/types';
+import type { SymbolInfo, CursorContext } from '../../../src/models/types';
 
 suite('PromptBuilder', () => {
   suite('strategy routing', () => {
@@ -36,6 +36,11 @@ suite('PromptBuilder', () => {
 
     test('uses ClassPromptStrategy for interface symbols', () => {
       const strategy = PromptBuilder.getStrategy('interface');
+      assert.ok(strategy instanceof ClassPromptStrategy);
+    });
+
+    test('uses ClassPromptStrategy for struct symbols', () => {
+      const strategy = PromptBuilder.getStrategy('struct');
       assert.ok(strategy instanceof ClassPromptStrategy);
     });
 
@@ -150,6 +155,72 @@ suite('PromptBuilder', () => {
       assert.ok(prompt.includes('Function Output'));
       assert.ok(prompt.includes('json:steps'));
       assert.ok(prompt.includes('json:subfunctions'));
+    });
+  });
+
+  suite('buildUnified', () => {
+    test('includes symbol identification section', () => {
+      const cursor: CursorContext = {
+        word: 'processUser',
+        filePath: 'src/main.ts',
+        position: { line: 10, character: 5 },
+        surroundingSource: 'function processUser(user: User) { return user.name; }',
+        cursorLine: 'function processUser(user: User) { return user.name; }',
+      };
+      const prompt = PromptBuilder.buildUnified(cursor);
+      assert.ok(prompt.includes('json:symbol_identity'));
+      assert.ok(prompt.includes('processUser'));
+      assert.ok(prompt.includes('Symbol Identification'));
+    });
+
+    test('includes all analysis sections for any symbol kind', () => {
+      const cursor: CursorContext = {
+        word: 'myVar',
+        filePath: 'src/store.ts',
+        position: { line: 5, character: 0 },
+        surroundingSource: 'const myVar = 42;',
+        cursorLine: 'const myVar = 42;',
+      };
+      const prompt = PromptBuilder.buildUnified(cursor);
+      assert.ok(prompt.includes('json:steps'));
+      assert.ok(prompt.includes('json:subfunctions'));
+      assert.ok(prompt.includes('json:function_inputs'));
+      assert.ok(prompt.includes('json:function_output'));
+      assert.ok(prompt.includes('json:class_members'));
+      assert.ok(prompt.includes('json:member_access'));
+      assert.ok(prompt.includes('json:variable_lifecycle'));
+      assert.ok(prompt.includes('json:data_flow'));
+      assert.ok(prompt.includes('json:callers'));
+      assert.ok(prompt.includes('json:related_symbols'));
+      assert.ok(prompt.includes('json:related_symbol_analyses'));
+    });
+
+    test('includes cache file naming convention instructions', () => {
+      const cursor: CursorContext = {
+        word: 'foo',
+        filePath: 'src/foo.ts',
+        position: { line: 0, character: 0 },
+        surroundingSource: 'function foo() {}',
+        cursorLine: 'function foo() {}',
+      };
+      const prompt = PromptBuilder.buildUnified(cursor, '/workspace/.vscode/code-explorer');
+      assert.ok(prompt.includes('Cache File Naming Convention'));
+      assert.ok(prompt.includes('kind_prefix'));
+      assert.ok(prompt.includes('/workspace/.vscode/code-explorer'));
+    });
+
+    test('includes surrounding source code in the prompt', () => {
+      const source = 'class MyClass {\n  getValue() { return 42; }\n}';
+      const cursor: CursorContext = {
+        word: 'getValue',
+        filePath: 'src/myclass.ts',
+        position: { line: 1, character: 2 },
+        surroundingSource: source,
+        cursorLine: '  getValue() { return 42; }',
+      };
+      const prompt = PromptBuilder.buildUnified(cursor);
+      assert.ok(prompt.includes(source));
+      assert.ok(prompt.includes('getValue() { return 42; }'));
     });
   });
 });

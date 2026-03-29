@@ -153,3 +153,70 @@ All providers use the shared `runCLI()` utility (`src/utils/cli.ts`) which handl
 - **mai-claude**: Runs `claude -p --output-format text`. **Must** `delete env.CLAUDECODE` — otherwise `claude` refuses to start inside a Claude Code session. Supports `--append-system-prompt`.
 - **Both**: Prompt is sent via **stdin** (not as CLI argument) — prompts can be many KB; stdin avoids OS argument length limits.
 - **Timeout**: `spawn()` doesn't support a `timeout` option; `runCLI()` uses `setTimeout` + `child.kill('SIGTERM')` with a `settled` guard. Default timeout is 15 minutes.
+
+## Execution Logging (Mandatory)
+
+**During EVERY prompt execution — no matter how big or small — you MUST create a detailed execution log in `docs/copilot-executions/` in REAL-TIME.**
+
+This is mandatory and must never be skipped. The log documents exactly what happened during the prompt so work is traceable, reproducible, and reviewable.
+
+### File naming
+- Files are sequenced: `01-short-title.md`, `02-another-title.md`, etc.
+- Check the last sequence number in `docs/copilot-executions/` and increment by 1. If no files exist, start with `01-`.
+- The title should be a short, descriptive kebab-case summary of what the prompt asked for.
+
+### Required sections
+Every execution log must include **all** of the following sections with detailed content:
+
+```markdown
+# <NN> - <Prompt Title>
+
+**Date**: YYYY-MM-DD HH:MM UTC
+**Prompt**: <The user's original prompt, quoted verbatim or closely paraphrased>
+
+## 1. Code Reading & Analysis
+- List every file read/explored during this prompt, with why it was read
+- Note relevant line numbers, functions, classes inspected
+- Include any grep/search queries run and what they found
+
+## 2. Issues Identified
+- Describe each issue found, with exact file path and line number(s)
+- Explain why it's a problem (root cause analysis)
+- Include relevant code snippets if helpful
+
+## 3. Plan
+- What approach/strategy was decided on to address the prompt
+- Any alternatives considered and why they were rejected
+- Dependencies or ordering constraints
+
+## 4. Changes Made
+- For each file changed:
+  - File path
+  - What was changed (before → after summary)
+  - Why the change was made
+- For new files created: file path and purpose
+- Write down the exact code diff for all changes made, with line numbers and context
+- If no code changes were made, explain why (e.g., "the issue was a misunderstanding")
+
+## 5. Commands Run
+- Every command executed (build, test, lint, etc.)
+- The result/output of each command (pass/fail, key output lines)
+- Any retries or troubleshooting steps
+
+## 6. Result
+- Final outcome: what was achieved
+- Any remaining issues or follow-up needed
+- Verification steps taken (tests, manual checks, etc.)
+
+## 7. Files Changed Summary
+| File | Action | Description |
+|------|--------|-------------|
+| path/to/file | Modified/Created/Deleted | Brief description |
+```
+
+### Rules
+- **Never skip this step**, even for single-line changes, doc-only changes, or exploratory prompts
+- Write the log at the very end, after all work is complete
+- Be detailed and specific — vague entries like "read some files" or "fixed the bug" are not acceptable
+- Include actual file paths, line numbers, command outputs, and error messages
+- If a prompt was purely exploratory (no code changes), still document what was read and what was learned

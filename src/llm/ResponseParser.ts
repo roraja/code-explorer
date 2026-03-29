@@ -4,7 +4,7 @@
  * Parses LLM markdown responses into structured AnalysisResult fields.
  * Handles inconsistent formatting gracefully.
  */
-import type { AnalysisResult, SymbolInfo, CallStackEntry, UsageEntry, RelatedSymbolAnalysis, FunctionStep, SubFunctionInfo, FunctionInputParam, FunctionOutputInfo, DataFlowEntry, VariableLifecycle, ClassMemberInfo, MemberAccessInfo } from '../models/types';
+import type { AnalysisResult, SymbolInfo, SymbolKindType, CallStackEntry, UsageEntry, RelatedSymbolAnalysis, FunctionStep, SubFunctionInfo, FunctionInputParam, FunctionOutputInfo, DataFlowEntry, VariableLifecycle, ClassMemberInfo, MemberAccessInfo } from '../models/types';
 import { logger } from '../utils/logger';
 
 /** Shape of a single caller entry in the LLM's json:callers block. */
@@ -16,7 +16,167 @@ interface LLMCallerEntry {
   context?: string;
 }
 
+/**
+ * The LLM-resolved identity of a symbol at the cursor position.
+ * Extracted from the `json:symbol_identity` block in the LLM response.
+ */
+export interface ResolvedSymbolIdentity {
+  /** Canonical symbol name */
+  name: string;
+  /** Symbol kind determined by the LLM */
+  kind: SymbolKindType;
+  /** Enclosing container name (class/struct/namespace), if any */
+  container: string | null;
+  /** Scope chain from outermost to innermost (excluding the symbol itself) */
+  scopeChain: string[];
+}
+
+/**
+ * A related symbol analysis entry with cache file path,
+ * produced by the LLM's `json:related_symbol_analyses` block.
+ * These can be written directly to the cache.
+ */
+export interface RelatedSymbolCacheEntry {
+  /** Relative cache file path (e.g. "src/utils/foo.ts/fn.bar.md") */
+  cacheFilePath: string;
+  /** Symbol name */
+  name: string;
+  /** Symbol kind */
+  kind: SymbolKindType;
+  /** Source file path (relative to workspace root) */
+  filePath: string;
+  /** Line number of the symbol definition */
+  line: number;
+  /** Container name, if any */
+  container: string | null;
+  /** Scope chain */
+  scopeChain: string[];
+  /** LLM-generated overview */
+  overview: string;
+  /** Key points about the symbol */
+  keyPoints: string[];
+  /** Dependencies */
+  dependencies: string[];
+  /** Potential issues */
+  potentialIssues: string[];
+}
+
 export class ResponseParser {
+  /** Valid symbol kinds that the LLM can return. */
+  private static readonly _validKinds = new Set<string>([
+    'function', 'method', 'class', 'struct', 'variable', 'interface',
+    'type', 'enum', 'property', 'parameter', 'unknown',
+  ]);
+
+  /**
+   * Extract the LLM-resolved symbol identity from the response.
+   * Parses the ```json:symbol_identity``` block.
+   *
+   * @param raw         The full LLM response text
+   * @param fallbackName  The word at the cursor, used as fallback if LLM doesn't return a name
+   * @returns Resolved identity, or a fallback with kind='unknown' if parsing fails
+   */
+  static parseSymbolIdentity(raw: string, fallbackName: string): ResolvedSymbolIdentity {
+    const match = raw.match(/```json:symbol_identity\s*\n([\s\S]*?)\n\s*```/);
+    if (!match) {
+      logger.warn('ResponseParser.parseSymbolIdentity: no json:symbol_identity block found');
+      return { name: fallbackName, kind: 'unknown', container: null, scopeChain: [] };
+    }
+
+    try {
+      const entry: unknown = JSON.parse(match[1]);
+      if (typeof entry !== 'object' || entry === null) {
+        logger.warn('ResponseParser.parseSymbolIdentity: json:symbol_identity is not an object');
+        return { name: fallbackName, kind: 'unknown', container: null, scopeChain: [] };
+      }
+      const e = entry as Record<string, unknown>;
+
+      const name = typeof e['name'] === 'string' && e['name'].length > 0
+        ? e['name']
+        : fallbackName;
+
+      const rawKind = typeof e['kind'] === 'string' ? e['kind'].toLowerCase() : 'unknown';
+      const kind = (this._validKinds.has(rawKind) ? rawKind : 'unknown') as SymbolKindType;
+
+      const container = typeof e['container'] === 'string' && e['container'].length > 0
+        ? e['container']
+        : null;
+
+      const scopeChain = Array.isArray(e['scope_chain'])
+        ? e['scope_chain'].filter((s): s is string => typeof s === 'string')
+        : (container ? [container] : []);
+
+      logger.info(
+        `ResponseParser.parseSymbolIdentity: resolved "${name}" as ${kind}` +
+          (container ? ` in ${container}` : '') +
+          (scopeChain.length > 0 ? ` scope=[${scopeChain.join('.')}]` : '')
+      );
+
+      return { name, kind, container, scopeChain };
+    } catch (err) {
+      logger.warn(`ResponseParser.parseSymbolIdentity: JSON parse error: ${err}`);
+      return { name: fallbackName, kind: 'unknown', container: null, scopeChain: [] };
+    }
+  }
+
+  /**
+   * Parse the ```json:related_symbol_analyses``` block from the unified response.
+   * Returns cache entries for related symbols that the LLM discovered and analyzed.
+   *
+   * @param raw The full LLM response text
+   */
+  static parseRelatedSymbolCacheEntries(raw: string): RelatedSymbolCacheEntry[] {
+    const match = raw.match(/```json:related_symbol_analyses\s*\n([\s\S]*?)\n\s*```/);
+    if (!match) {
+      logger.debug('ResponseParser.parseRelatedSymbolCacheEntries: no json:related_symbol_analyses block found');
+      return [];
+    }
+
+    try {
+      const entries: unknown[] = JSON.parse(match[1]);
+      if (!Array.isArray(entries)) {
+        logger.warn('ResponseParser.parseRelatedSymbolCacheEntries: json:related_symbol_analyses is not an array');
+        return [];
+      }
+
+      const results: RelatedSymbolCacheEntry[] = [];
+      for (const entry of entries) {
+        if (typeof entry !== 'object' || entry === null) {
+          continue;
+        }
+        const e = entry as Record<string, unknown>;
+        if (!e['name'] || !e['filePath'] || !e['overview']) {
+          continue;
+        }
+
+        const rawKind = typeof e['kind'] === 'string' ? e['kind'].toLowerCase() : 'unknown';
+        const kind = (this._validKinds.has(rawKind) ? rawKind : 'unknown') as SymbolKindType;
+
+        results.push({
+          cacheFilePath: typeof e['cache_file_path'] === 'string' ? e['cache_file_path'] : '',
+          name: String(e['name']),
+          kind,
+          filePath: String(e['filePath']),
+          line: typeof e['line'] === 'number' ? e['line'] : 0,
+          container: typeof e['container'] === 'string' && e['container'].length > 0 ? e['container'] : null,
+          scopeChain: Array.isArray(e['scope_chain'])
+            ? e['scope_chain'].filter((s): s is string => typeof s === 'string')
+            : [],
+          overview: String(e['overview']),
+          keyPoints: Array.isArray(e['key_points']) ? e['key_points'].map(String) : [],
+          dependencies: Array.isArray(e['dependencies']) ? e['dependencies'].map(String) : [],
+          potentialIssues: Array.isArray(e['potential_issues']) ? e['potential_issues'].map(String) : [],
+        });
+      }
+
+      logger.info(`ResponseParser.parseRelatedSymbolCacheEntries: parsed ${results.length} related symbol cache entries`);
+      return results;
+    } catch (err) {
+      logger.warn(`ResponseParser.parseRelatedSymbolCacheEntries: JSON parse error: ${err}`);
+      return [];
+    }
+  }
+
   /**
    * Parse an LLM markdown response into partial AnalysisResult fields.
    */

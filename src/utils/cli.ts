@@ -19,6 +19,8 @@ export interface CLIRunOptions {
   timeoutMs?: number;
   /** Environment variable overrides — keys set to undefined are deleted. */
   envOverrides?: Record<string, string | undefined>;
+  /** Working directory for the spawned process. Defaults to process.cwd(). */
+  cwd?: string;
   /** Label for log messages (e.g. 'mai-claude', 'copilot-cli'). */
   label: string;
   /** Optional callback invoked with each stdout chunk as it arrives. */
@@ -35,7 +37,7 @@ export interface CLIRunOptions {
  * - Uses a `settled` guard to prevent double-resolve/reject.
  */
 export function runCLI(options: CLIRunOptions): Promise<string> {
-  const { command, args, stdinData, timeoutMs = 900_000, envOverrides, label, onStdoutChunk, onStderrChunk } = options;
+  const { command, args, stdinData, timeoutMs = 900_000, envOverrides, cwd, label, onStdoutChunk, onStderrChunk } = options;
 
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
@@ -51,6 +53,7 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
 
     const child = spawn(command, args, {
       env,
+      cwd: cwd || process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

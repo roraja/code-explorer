@@ -8,4 +8,6 @@ export interface LLMProvider {
   isAvailable(): Promise<boolean>;
   analyze(request: LLMAnalysisRequest): Promise<string>;
   getCapabilities(): ProviderCapabilities;
+  /** Set workspace root for providers that run CLI tools with workspace context. */
+  setWorkspaceRoot?(root: string): void;
 }

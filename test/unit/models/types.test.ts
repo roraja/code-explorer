@@ -9,6 +9,7 @@ import {
   SYMBOL_KIND_PREFIX,
   type SymbolKindType,
   type SymbolInfo,
+  type CursorContext,
   type AnalysisResult,
   type CallStackEntry,
   type UsageEntry,
@@ -41,6 +42,7 @@ suite('Data Models', () => {
         'enum',
         'property',
         'parameter',
+        'struct',
         'unknown',
       ];
       for (const kind of expectedKinds) {
@@ -59,6 +61,7 @@ suite('Data Models', () => {
       assert.strictEqual(SYMBOL_KIND_PREFIX.enum, 'enum');
       assert.strictEqual(SYMBOL_KIND_PREFIX.property, 'prop');
       assert.strictEqual(SYMBOL_KIND_PREFIX.parameter, 'param');
+      assert.strictEqual(SYMBOL_KIND_PREFIX.struct, 'struct');
       assert.strictEqual(SYMBOL_KIND_PREFIX.unknown, 'sym');
     });
   });
@@ -430,6 +433,24 @@ suite('Data Models', () => {
       assert.strictEqual(lifecycle.declaration, 'const at line 10');
       assert.strictEqual(lifecycle.mutations.length, 2);
       assert.strictEqual(lifecycle.consumption.length, 1);
+    });
+  });
+
+  suite('CursorContext', () => {
+    test('can be created with all fields', () => {
+      const cursor: CursorContext = {
+        word: 'processUser',
+        filePath: 'src/main.ts',
+        position: { line: 10, character: 5 },
+        surroundingSource: 'function processUser(user: User) { return user.name; }',
+        cursorLine: 'function processUser(user: User) { return user.name; }',
+      };
+      assert.strictEqual(cursor.word, 'processUser');
+      assert.strictEqual(cursor.filePath, 'src/main.ts');
+      assert.strictEqual(cursor.position.line, 10);
+      assert.strictEqual(cursor.position.character, 5);
+      assert.ok(cursor.surroundingSource.length > 0);
+      assert.ok(cursor.cursorLine.length > 0);
     });
   });
 });

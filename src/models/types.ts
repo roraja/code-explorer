@@ -24,6 +24,7 @@ export type SymbolKindType =
   | 'enum'
   | 'property'
   | 'parameter'
+  | 'struct'
   | 'unknown';
 
 /**
@@ -39,6 +40,7 @@ export const SYMBOL_KIND_PREFIX: Record<SymbolKindType, string> = {
   enum: 'enum',
   property: 'prop',
   parameter: 'param',
+  struct: 'struct',
   unknown: 'sym',
 };
 
@@ -84,6 +86,28 @@ export interface SymbolInfo {
    * Used as the primary axis for cache key resolution and tab deduplication.
    */
   scopeChain?: string[];
+}
+
+/**
+ * Lightweight cursor context gathered cheaply from the editor.
+ * Used as input when the user triggers "Explore Symbol" — avoids
+ * the expensive VS Code symbol resolution stage by deferring
+ * symbol identification to the LLM.
+ */
+export interface CursorContext {
+  /** The word/token at the cursor position */
+  word: string;
+  /** Relative path from workspace root to the source file */
+  filePath: string;
+  /** Cursor position (0-based line and character) */
+  position: Position;
+  /**
+   * Source code surrounding the cursor (typically ±50 lines).
+   * Gives the LLM enough context to identify the symbol kind.
+   */
+  surroundingSource: string;
+  /** The line of source code where the cursor is */
+  cursorLine: string;
 }
 
 // =====================
@@ -496,6 +520,7 @@ export interface CacheStats {
 
 /** Granular loading stage for progress display. */
 export type LoadingStage =
+  | 'resolving-symbol'
   | 'cache-check'
   | 'reading-source'
   | 'llm-analyzing'
@@ -503,6 +528,7 @@ export type LoadingStage =
 
 /** Human-readable labels for each loading stage. */
 export const LOADING_STAGE_LABELS: Record<LoadingStage, string> = {
+  'resolving-symbol': 'Identifying symbol…',
   'cache-check': 'Checking cache…',
   'reading-source': 'Reading source code…',
   'llm-analyzing': 'Running LLM analysis…',

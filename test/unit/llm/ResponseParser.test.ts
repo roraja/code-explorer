@@ -488,4 +488,194 @@ A class.
       assert.strictEqual(result.memberAccess, undefined);
     });
   });
+
+  suite('parseSymbolIdentity', () => {
+    test('extracts symbol identity from json:symbol_identity block', () => {
+      const raw = `### Step 1: Symbol Identification
+
+\`\`\`json:symbol_identity
+{
+  "name": "processUser",
+  "kind": "function",
+  "container": "UserService",
+  "scope_chain": ["UserService"]
+}
+\`\`\`
+`;
+      const identity = ResponseParser.parseSymbolIdentity(raw, 'processUser');
+      assert.strictEqual(identity.name, 'processUser');
+      assert.strictEqual(identity.kind, 'function');
+      assert.strictEqual(identity.container, 'UserService');
+      assert.deepStrictEqual(identity.scopeChain, ['UserService']);
+    });
+
+    test('returns fallback for missing json:symbol_identity block', () => {
+      const raw = '### Overview\nSome text.';
+      const identity = ResponseParser.parseSymbolIdentity(raw, 'myVar');
+      assert.strictEqual(identity.name, 'myVar');
+      assert.strictEqual(identity.kind, 'unknown');
+      assert.strictEqual(identity.container, null);
+      assert.deepStrictEqual(identity.scopeChain, []);
+    });
+
+    test('returns fallback for malformed JSON', () => {
+      const raw = '```json:symbol_identity\n{ broken json\n```';
+      const identity = ResponseParser.parseSymbolIdentity(raw, 'fallback');
+      assert.strictEqual(identity.name, 'fallback');
+      assert.strictEqual(identity.kind, 'unknown');
+    });
+
+    test('defaults kind to unknown for invalid kind values', () => {
+      const raw = `\`\`\`json:symbol_identity
+{
+  "name": "foo",
+  "kind": "widget",
+  "container": null,
+  "scope_chain": []
+}
+\`\`\``;
+      const identity = ResponseParser.parseSymbolIdentity(raw, 'foo');
+      assert.strictEqual(identity.kind, 'unknown');
+    });
+
+    test('recognizes struct as a valid kind', () => {
+      const raw = `\`\`\`json:symbol_identity
+{
+  "name": "Point",
+  "kind": "struct",
+  "container": null,
+  "scope_chain": []
+}
+\`\`\``;
+      const identity = ResponseParser.parseSymbolIdentity(raw, 'Point');
+      assert.strictEqual(identity.kind, 'struct');
+    });
+
+    test('uses container as scope chain fallback when scope_chain is missing', () => {
+      const raw = `\`\`\`json:symbol_identity
+{
+  "name": "getValue",
+  "kind": "method",
+  "container": "MyClass"
+}
+\`\`\``;
+      const identity = ResponseParser.parseSymbolIdentity(raw, 'getValue');
+      assert.strictEqual(identity.container, 'MyClass');
+      assert.deepStrictEqual(identity.scopeChain, ['MyClass']);
+    });
+
+    test('uses fallback name when name is empty in response', () => {
+      const raw = `\`\`\`json:symbol_identity
+{
+  "name": "",
+  "kind": "variable",
+  "container": null,
+  "scope_chain": []
+}
+\`\`\``;
+      const identity = ResponseParser.parseSymbolIdentity(raw, 'myFallback');
+      assert.strictEqual(identity.name, 'myFallback');
+    });
+  });
+
+  suite('parseRelatedSymbolCacheEntries', () => {
+    test('extracts related symbol cache entries from json:related_symbol_analyses block', () => {
+      const raw = `### Related Symbols
+
+\`\`\`json:related_symbol_analyses
+[
+  {
+    "cache_file_path": "src/utils/validators.ts/fn.validateEmail.md",
+    "name": "validateEmail",
+    "kind": "function",
+    "filePath": "src/utils/validators.ts",
+    "line": 15,
+    "container": null,
+    "scope_chain": [],
+    "overview": "Validates email format against RFC 5322.",
+    "key_points": ["Uses regex", "Returns boolean"],
+    "dependencies": [],
+    "potential_issues": ["No i18n support"]
+  },
+  {
+    "cache_file_path": "src/models/User.ts/class.User.md",
+    "name": "User",
+    "kind": "class",
+    "filePath": "src/models/User.ts",
+    "line": 5,
+    "container": null,
+    "scope_chain": [],
+    "overview": "Domain model for user entities.",
+    "key_points": ["Immutable"],
+    "dependencies": ["BaseEntity"],
+    "potential_issues": []
+  }
+]
+\`\`\`
+`;
+      const entries = ResponseParser.parseRelatedSymbolCacheEntries(raw);
+      assert.strictEqual(entries.length, 2);
+
+      const first = entries[0];
+      assert.strictEqual(first.name, 'validateEmail');
+      assert.strictEqual(first.kind, 'function');
+      assert.strictEqual(first.cacheFilePath, 'src/utils/validators.ts/fn.validateEmail.md');
+      assert.strictEqual(first.filePath, 'src/utils/validators.ts');
+      assert.strictEqual(first.line, 15);
+      assert.strictEqual(first.container, null);
+      assert.deepStrictEqual(first.scopeChain, []);
+      assert.deepStrictEqual(first.keyPoints, ['Uses regex', 'Returns boolean']);
+      assert.deepStrictEqual(first.potentialIssues, ['No i18n support']);
+
+      const second = entries[1];
+      assert.strictEqual(second.name, 'User');
+      assert.strictEqual(second.kind, 'class');
+      assert.deepStrictEqual(second.dependencies, ['BaseEntity']);
+    });
+
+    test('returns empty array when no json:related_symbol_analyses block exists', () => {
+      const raw = '### Overview\nSome text.';
+      const entries = ResponseParser.parseRelatedSymbolCacheEntries(raw);
+      assert.strictEqual(entries.length, 0);
+    });
+
+    test('skips entries missing required fields', () => {
+      const raw = `\`\`\`json:related_symbol_analyses
+[
+  { "name": "valid", "filePath": "src/valid.ts", "overview": "Valid.", "kind": "function", "line": 1 },
+  { "name": "noOverview", "filePath": "src/missing.ts", "kind": "function", "line": 1 },
+  { "filePath": "src/noname.ts", "overview": "No name.", "kind": "class", "line": 1 }
+]
+\`\`\``;
+      const entries = ResponseParser.parseRelatedSymbolCacheEntries(raw);
+      assert.strictEqual(entries.length, 1);
+      assert.strictEqual(entries[0].name, 'valid');
+    });
+
+    test('handles malformed JSON gracefully', () => {
+      const raw = '```json:related_symbol_analyses\n{ broken }\n```';
+      const entries = ResponseParser.parseRelatedSymbolCacheEntries(raw);
+      assert.strictEqual(entries.length, 0);
+    });
+
+    test('defaults kind to unknown for invalid kind values', () => {
+      const raw = `\`\`\`json:related_symbol_analyses
+[
+  {
+    "name": "foo",
+    "kind": "widget",
+    "filePath": "src/foo.ts",
+    "line": 1,
+    "overview": "Some overview.",
+    "key_points": [],
+    "dependencies": [],
+    "potential_issues": []
+  }
+]
+\`\`\``;
+      const entries = ResponseParser.parseRelatedSymbolCacheEntries(raw);
+      assert.strictEqual(entries.length, 1);
+      assert.strictEqual(entries[0].kind, 'unknown');
+    });
+  });
 });

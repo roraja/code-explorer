@@ -18,6 +18,14 @@ const execFileAsync = promisify(execFile);
 export class MaiClaudeProvider implements LLMProvider {
   readonly name = 'mai-claude';
 
+  /** Workspace root directory — when set, claude runs with full workspace context. */
+  private _workspaceRoot?: string;
+
+  /** Set the workspace root so claude CLI has full workspace context. */
+  setWorkspaceRoot(root: string): void {
+    this._workspaceRoot = root;
+  }
+
   async isAvailable(): Promise<boolean> {
     try {
       await execFileAsync('which', ['claude']);
@@ -45,6 +53,7 @@ export class MaiClaudeProvider implements LLMProvider {
         command: 'claude',
         args,
         stdinData: request.prompt,
+        cwd: this._workspaceRoot,
         label: 'mai-claude',
         envOverrides: { CLAUDECODE: undefined },
         onStdoutChunk: (chunk) => logger.logLLMChunk(chunk),

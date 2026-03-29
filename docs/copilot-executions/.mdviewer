@@ -1,0 +1,7 @@
+{
+  "tags": {},
+  "opened": {
+    "01-fix-cursor-cache-lookup.md": true,
+    "01-fix-vsce-package-warnings.md": true
+  }
+}

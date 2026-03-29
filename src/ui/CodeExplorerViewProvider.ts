@@ -7,7 +7,7 @@
  * The webview is a pure renderer — it never owns state.
  */
 import * as vscode from 'vscode';
-import type { SymbolInfo, TabState, WebviewToExtensionMessage } from '../models/types';
+import type { SymbolInfo, CursorContext, TabState, WebviewToExtensionMessage } from '../models/types';
 import type { AnalysisOrchestrator } from '../analysis/AnalysisOrchestrator';
 import { logger } from '../utils/logger';
 
@@ -150,6 +150,83 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       }
       this._pushState();
       logger.error(`ViewProvider.openTab: analysis failed for ${symbol.name}: ${message}`);
+    }
+  }
+
+  /**
+   * Open a tab from a CursorContext — the LLM resolves the symbol kind
+   * and performs analysis in a single call (no VS Code symbol resolution).
+   *
+   * This is the primary entry point for the "Explore Symbol" command.
+   * The tab is created with a temporary SymbolInfo using kind='unknown',
+   * then updated with the resolved kind once the LLM responds.
+   */
+  public async openTabFromCursor(cursor: CursorContext): Promise<void> {
+    logger.info(`ViewProvider.openTabFromCursor: "${cursor.word}" in ${cursor.filePath}:${cursor.position.line}`);
+
+    // Create a temporary tab while the LLM resolves and analyzes
+    const tabId = `tab-${++this._tabCounter}`;
+    const tempSymbol: SymbolInfo = {
+      name: cursor.word,
+      kind: 'unknown',
+      filePath: cursor.filePath,
+      position: cursor.position,
+    };
+
+    const tab: TabState = {
+      id: tabId,
+      symbol: tempSymbol,
+      status: 'loading',
+      analysis: null,
+      loadingStage: 'resolving-symbol',
+    };
+
+    this._tabs.push(tab);
+    this._activeTabId = tabId;
+    this._pushState();
+    logger.info(`ViewProvider.openTabFromCursor: created tab ${tabId}, triggering unified analysis`);
+
+    if (!this._orchestrator) {
+      logger.warn('ViewProvider.openTabFromCursor: no orchestrator');
+      return;
+    }
+
+    try {
+      const { symbol: resolvedSymbol, result } = await this._orchestrator.analyzeFromCursor(
+        cursor,
+        (stage) => {
+          const t = this._tabs.find((x) => x.id === tabId);
+          if (t && t.status === 'loading') {
+            t.loadingStage = stage;
+            this._pushState();
+          }
+        }
+      );
+
+      // Update tab with the resolved symbol and analysis result
+      const t = this._tabs.find((x) => x.id === tabId);
+      if (t) {
+        t.symbol = resolvedSymbol;
+        t.status = 'ready';
+        t.analysis = result;
+        delete t.loadingStage;
+        logger.info(
+          `ViewProvider.openTabFromCursor: analysis ready for tab ${tabId} — ` +
+            `resolved as ${resolvedSymbol.kind} "${resolvedSymbol.name}"`
+        );
+      } else {
+        logger.warn(`ViewProvider.openTabFromCursor: tab ${tabId} was removed during analysis`);
+      }
+      this._pushState();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const t = this._tabs.find((x) => x.id === tabId);
+      if (t) {
+        t.status = 'error';
+        t.error = message;
+      }
+      this._pushState();
+      logger.error(`ViewProvider.openTabFromCursor: analysis failed for "${cursor.word}": ${message}`);
     }
   }
 

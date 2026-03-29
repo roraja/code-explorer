@@ -5,14 +5,15 @@
  * and registering VS Code contributions.
  */
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { EXTENSION_DISPLAY_NAME, VIEW_ID, COMMANDS } from './models/constants';
 import { CodeExplorerViewProvider } from './ui/CodeExplorerViewProvider';
-import { SymbolResolver } from './providers/SymbolResolver';
 import { StaticAnalyzer } from './analysis/StaticAnalyzer';
 import { AnalysisOrchestrator } from './analysis/AnalysisOrchestrator';
 import { CacheStore } from './cache/CacheStore';
 import { LLMProviderFactory } from './llm/LLMProviderFactory';
 import { logger, LogLevel } from './utils/logger';
+import type { CursorContext } from './models/types';
 
 export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -34,8 +35,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- LLM Layer ---
   const llmProvider = LLMProviderFactory.create(llmProviderName);
 
+  // Set workspace root so the CLI provider runs with full workspace context
+  if (llmProvider.setWorkspaceRoot) {
+    llmProvider.setWorkspaceRoot(workspaceRoot);
+  }
+
   // --- Analysis Layer ---
-  const symbolResolver = new SymbolResolver();
   const staticAnalyzer = new StaticAnalyzer();
   const cacheStore = new CacheStore(workspaceRoot);
   const orchestrator = new AnalysisOrchestrator(staticAnalyzer, llmProvider, cacheStore);
@@ -59,7 +64,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // The argument may be a SymbolInfo (from programmatic call),
       // a Uri (from context menu), or undefined (from keybinding/command palette).
       // Only use it if it looks like a SymbolInfo.
-      let symbol =
+      const symbol =
         symbolOrUndefined &&
         typeof symbolOrUndefined === 'object' &&
         'name' in symbolOrUndefined &&
@@ -69,31 +74,62 @@ export function activate(context: vscode.ExtensionContext): void {
           ? symbolOrUndefined
           : undefined;
 
-      if (!symbol) {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-          logger.warn('exploreSymbol: no active editor');
-          vscode.window.showWarningMessage(
-            'No active editor. Open a file and place cursor on a symbol.'
-          );
-          return;
-        }
-        logger.debug(
-          `exploreSymbol: resolving at ${editor.document.fileName}:${editor.selection.active.line}:${editor.selection.active.character}`
-        );
-        symbol = await symbolResolver.resolveAtPosition(editor.document, editor.selection.active);
-      }
       if (symbol) {
+        // Programmatic call with a pre-resolved SymbolInfo — use legacy flow
         logger.info(
           `exploreSymbol: focusing sidebar and opening tab for ${symbol.kind} ${symbol.name}`
         );
-        // Ensure the sidebar is visible
         await vscode.commands.executeCommand('codeExplorer.sidebar.focus');
         viewProvider.openTab(symbol);
-      } else {
-        logger.warn('exploreSymbol: no symbol found at cursor position');
-        vscode.window.showWarningMessage('No symbol found at cursor position.');
+        return;
       }
+
+      // New flow: gather lightweight cursor context and let the LLM resolve + analyze
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        logger.warn('exploreSymbol: no active editor');
+        vscode.window.showWarningMessage(
+          'No active editor. Open a file and place cursor on a symbol.'
+        );
+        return;
+      }
+
+      const position = editor.selection.active;
+      const wordRange = editor.document.getWordRangeAtPosition(position);
+      if (!wordRange) {
+        logger.warn('exploreSymbol: no word at cursor position');
+        vscode.window.showWarningMessage('No symbol found at cursor position.');
+        return;
+      }
+
+      const word = editor.document.getText(wordRange);
+      const relPath = path.relative(workspaceRoot, editor.document.fileName);
+
+      // Gather surrounding source code (±50 lines for context)
+      const startLine = Math.max(0, position.line - 50);
+      const endLine = Math.min(editor.document.lineCount - 1, position.line + 50);
+      const surroundingRange = new vscode.Range(
+        startLine, 0,
+        endLine, editor.document.lineAt(endLine).text.length
+      );
+      const surroundingSource = editor.document.getText(surroundingRange);
+      const cursorLine = editor.document.lineAt(position.line).text;
+
+      const cursorContext: CursorContext = {
+        word,
+        filePath: relPath,
+        position: { line: position.line, character: position.character },
+        surroundingSource,
+        cursorLine,
+      };
+
+      logger.debug(
+        `exploreSymbol: cursor context — word="${word}" in ${relPath}:${position.line}:${position.character}`
+      );
+
+      // Ensure the sidebar is visible and open a tab via cursor-based flow
+      await vscode.commands.executeCommand('codeExplorer.sidebar.focus');
+      viewProvider.openTabFromCursor(cursorContext);
     }),
 
     vscode.commands.registerCommand(COMMANDS.REFRESH_ANALYSIS, () => {

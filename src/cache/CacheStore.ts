@@ -881,6 +881,24 @@ If no match, output:
       lines.push('');
     }
 
+    // Q&A History
+    if (result.qaHistory && result.qaHistory.length > 0) {
+      lines.push('## Q&A');
+      lines.push('');
+      for (const qa of result.qaHistory) {
+        const time = new Date(qa.timestamp).toLocaleString();
+        lines.push(`### Q: ${qa.question}`);
+        lines.push(`*${time}*`);
+        lines.push('');
+        lines.push(qa.answer);
+        lines.push('');
+      }
+      lines.push('```json:qa_history');
+      lines.push(JSON.stringify(result.qaHistory, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
     return lines.join('\n');
   }
 
@@ -1022,6 +1040,22 @@ If no match, output:
         mermaidSource: string;
       }>(body, 'diagrams');
 
+      // Parse Q&A history from json:qa_history block
+      const qaHistoryRaw = this._parseJsonBlock<{
+        question: string;
+        answer: string;
+        timestamp: string;
+      }>(body, 'qa_history');
+      const qaHistory =
+        qaHistoryRaw.length > 0
+          ? qaHistoryRaw.filter(
+              (q) =>
+                typeof q.question === 'string' &&
+                typeof q.answer === 'string' &&
+                typeof q.timestamp === 'string'
+            )
+          : undefined;
+
       return {
         symbol,
         overview: sections['overview'] || '',
@@ -1122,6 +1156,7 @@ If no match, output:
                   mermaidSource: d.mermaidSource,
                 }))
             : undefined,
+        qaHistory,
         metadata,
       };
     } catch (err) {

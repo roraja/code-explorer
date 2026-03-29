@@ -1207,3 +1207,232 @@ a.data-flow-item__file:hover {
 .diagram-container--error {
   border-color: var(--vscode-inputValidation-errorBorder, rgba(255, 100, 100, 0.3));
 }
+
+/* =====================
+   Enhance Bar
+   ===================== */
+
+.enhance-bar {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+}
+
+.enhance-bar__button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, rgba(255, 255, 255, 0.08));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--vscode-font-family);
+  transition: background 0.15s;
+}
+
+.enhance-bar__button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(255, 255, 255, 0.15));
+}
+
+.enhance-bar__icon {
+  font-size: 12px;
+}
+
+.enhance-bar__label {
+  font-weight: 500;
+}
+
+/* =====================
+   Enhance Dialog
+   ===================== */
+
+.enhance-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.15s ease-in;
+}
+
+.enhance-dialog {
+  width: 90%;
+  max-width: 420px;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border: 1px solid var(--vscode-widget-border, #454545);
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.enhance-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
+  background: var(--vscode-sideBarSectionHeader-background, transparent);
+}
+
+.enhance-dialog__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.enhance-dialog__close {
+  background: none;
+  border: none;
+  color: var(--vscode-foreground);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.enhance-dialog__close:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+}
+
+.enhance-dialog__body {
+  padding: 12px 14px;
+}
+
+.enhance-dialog__label {
+  display: block;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 8px;
+}
+
+.enhance-dialog__input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-input-border, rgba(255, 255, 255, 0.2));
+  border-radius: 3px;
+  background: var(--vscode-input-background, rgba(255, 255, 255, 0.05));
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font-family: var(--vscode-font-family);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+
+.enhance-dialog__input:focus {
+  border-color: var(--vscode-focusBorder, #007acc);
+}
+
+.enhance-dialog__input--error {
+  border-color: var(--vscode-inputValidation-errorBorder, #f88);
+}
+
+.enhance-dialog__input::placeholder {
+  color: var(--vscode-input-placeholderForeground, rgba(255, 255, 255, 0.3));
+}
+
+.enhance-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 14px 12px;
+}
+
+.enhance-dialog__cancel {
+  padding: 4px 14px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, rgba(255, 255, 255, 0.08));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--vscode-font-family);
+}
+
+.enhance-dialog__cancel:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(255, 255, 255, 0.15));
+}
+
+.enhance-dialog__submit {
+  padding: 4px 14px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-background, #0078d4);
+  color: var(--vscode-button-foreground, #fff);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--vscode-font-family);
+}
+
+.enhance-dialog__submit:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+/* =====================
+   Q&A Section
+   ===================== */
+
+.qa-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.qa-item {
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--vscode-editor-background, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.06));
+}
+
+.qa-item__question {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.qa-item__q-label {
+  font-weight: 700;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  flex-shrink: 0;
+}
+
+.qa-item__q-text {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.qa-item__time {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 6px;
+  opacity: 0.7;
+}
+
+.qa-item__answer {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-left: 2px;
+  border-left: 2px solid var(--vscode-textLink-foreground, rgba(55, 148, 255, 0.3));
+  padding-left: 10px;
+}

@@ -326,7 +326,43 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         this._exploreSymbolByName(message.symbolName, message.filePath, message.line, message.kind);
         break;
       }
+
+      case 'enhanceAnalysis': {
+        logger.info(
+          `ViewProvider: enhanceAnalysis for tab ${message.tabId} — prompt: "${message.userPrompt.substring(0, 80)}"`
+        );
+        this._handleEnhanceAnalysis(message.tabId, message.userPrompt);
+        break;
+      }
     }
+  }
+
+  private async _handleEnhanceAnalysis(tabId: string, userPrompt: string): Promise<void> {
+    const tab = this._tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.analysis || !this._orchestrator) {
+      logger.warn(`ViewProvider._handleEnhanceAnalysis: tab ${tabId} not found or no analysis`);
+      return;
+    }
+
+    // Set tab to loading state (keep existing analysis visible, just show enhancing indicator)
+    tab.status = 'loading';
+    tab.loadingStage = 'llm-analyzing';
+    this._pushState();
+
+    try {
+      const updatedResult = await this._orchestrator.enhanceAnalysis(tab.analysis, userPrompt);
+      tab.analysis = updatedResult;
+      tab.status = 'ready';
+      delete tab.loadingStage;
+      logger.info(`ViewProvider._handleEnhanceAnalysis: enhance complete for tab ${tabId}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      tab.status = 'ready'; // Keep showing the existing analysis even on error
+      delete tab.loadingStage;
+      logger.error(`ViewProvider._handleEnhanceAnalysis: failed: ${message}`);
+    }
+
+    this._pushState();
   }
 
   private async _exploreSymbolByName(

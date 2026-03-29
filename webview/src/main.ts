@@ -236,6 +236,14 @@ function renderAnalysis(tab: Tab): string {
     ${fileBreadcrumb}
   </div>`);
 
+  // Enhance button
+  sections.push(`<div class="enhance-bar">
+    <button class="enhance-bar__button" data-tab-id="${tab.id}">
+      <span class="enhance-bar__icon">✨</span>
+      <span class="enhance-bar__label">Enhance</span>
+    </button>
+  </div>`);
+
   // LLM badge
   if (a.metadata?.llmProvider) {
     sections.push(
@@ -585,6 +593,27 @@ function renderAnalysis(tab: Tab): string {
     }
   }
 
+  // Q&A History
+  if (a.qaHistory && a.qaHistory.length > 0) {
+    const items = a.qaHistory
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((qa: any, index: number) => {
+        const time = qa.timestamp ? new Date(qa.timestamp).toLocaleString() : '';
+        return `<div class="qa-item" id="qa-item-${index}">
+          <div class="qa-item__question">
+            <span class="qa-item__q-label">Q:</span>
+            <span class="qa-item__q-text">${esc(qa.question)}</span>
+          </div>
+          <div class="qa-item__time">${esc(time)}</div>
+          <div class="qa-item__answer">${esc(qa.answer)}</div>
+        </div>`;
+      })
+      .join('');
+    sections.push(
+      renderSection(`Q&A (${a.qaHistory.length})`, `<div class="qa-list">${items}</div>`)
+    );
+  }
+
   // Timestamp
   if (a.metadata?.analyzedAt) {
     const time = new Date(a.metadata.analyzedAt).toLocaleString();
@@ -681,6 +710,110 @@ function attachListeners(): void {
         });
       }
     });
+  });
+
+  // Enhance button — opens input dialog for user question/enhancement request
+  document.querySelectorAll('.enhance-bar__button').forEach((el) => {
+    el.addEventListener('click', () => {
+      const tabId = (el as HTMLElement).dataset.tabId;
+      if (!tabId) {
+        return;
+      }
+      _showEnhanceDialog(tabId);
+    });
+  });
+}
+
+// =====================
+// Enhance Dialog
+// =====================
+
+/**
+ * Show a modal dialog for the user to enter their question or enhancement request.
+ * When submitted, sends an 'enhanceAnalysis' message to the extension.
+ */
+function _showEnhanceDialog(tabId: string): void {
+  // Remove any existing dialog
+  const existing = document.getElementById('enhance-dialog-overlay');
+  if (existing) {
+    existing.remove();
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'enhance-dialog-overlay';
+  overlay.className = 'enhance-dialog-overlay';
+
+  overlay.innerHTML = `<div class="enhance-dialog">
+    <div class="enhance-dialog__header">
+      <span class="enhance-dialog__title">✨ Enhance Analysis</span>
+      <button class="enhance-dialog__close" id="enhance-dialog-close">×</button>
+    </div>
+    <div class="enhance-dialog__body">
+      <label class="enhance-dialog__label" for="enhance-dialog-input">
+        Ask a question or request an enhancement:
+      </label>
+      <textarea
+        class="enhance-dialog__input"
+        id="enhance-dialog-input"
+        rows="4"
+        placeholder="e.g., How does this function handle errors? What are the edge cases? Can you explain the algorithm in more detail?"
+      ></textarea>
+    </div>
+    <div class="enhance-dialog__footer">
+      <button class="enhance-dialog__cancel" id="enhance-dialog-cancel">Cancel</button>
+      <button class="enhance-dialog__submit" id="enhance-dialog-submit">Send</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+
+  const input = document.getElementById('enhance-dialog-input') as HTMLTextAreaElement;
+  const submitBtn = document.getElementById('enhance-dialog-submit') as HTMLButtonElement;
+  const cancelBtn = document.getElementById('enhance-dialog-cancel') as HTMLButtonElement;
+  const closeBtn = document.getElementById('enhance-dialog-close') as HTMLButtonElement;
+
+  // Focus the input
+  setTimeout(() => input.focus(), 50);
+
+  const close = (): void => {
+    overlay.remove();
+  };
+
+  const submit = (): void => {
+    const userPrompt = input.value.trim();
+    if (!userPrompt) {
+      input.classList.add('enhance-dialog__input--error');
+      input.focus();
+      return;
+    }
+
+    log(`enhance: submitting prompt for tab ${tabId}: "${userPrompt.substring(0, 80)}"`);
+    vscode.postMessage({
+      type: 'enhanceAnalysis',
+      tabId,
+      userPrompt,
+    });
+    close();
+  };
+
+  submitBtn.addEventListener('click', submit);
+  cancelBtn.addEventListener('click', close);
+  closeBtn.addEventListener('click', close);
+
+  // Close on Escape, submit on Ctrl+Enter
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      close();
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      submit();
+    }
+  });
+
+  // Close on overlay click (outside dialog)
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      close();
+    }
   });
 }
 

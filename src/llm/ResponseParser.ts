@@ -122,6 +122,20 @@ export interface FileSymbolAnalysisEntry {
   potentialIssues: string[];
 }
 
+/**
+ * Result of parsing an enhance response from the LLM.
+ */
+export interface EnhanceParseResult {
+  /** The main answer to the user's question */
+  answer: string;
+  /** Updated overview if the LLM suggested one, or null */
+  updatedOverview: string | null;
+  /** Additional key points discovered */
+  additionalKeyPoints: string[];
+  /** Additional potential issues discovered */
+  additionalIssues: string[];
+}
+
 export class ResponseParser {
   /** Valid symbol kinds that the LLM can return. */
   private static readonly _validKinds = new Set<string>([
@@ -465,6 +479,81 @@ export class ResponseParser {
       logger.warn(`ResponseParser.parseFileSymbolAnalyses: JSON parse error: ${err}`);
       return [];
     }
+  }
+
+  /**
+   * Parse an enhance response from the LLM.
+   *
+   * Extracts:
+   * - The main answer (everything under ### Answer)
+   * - An optional updated overview (under ### Updated Overview)
+   * - Additional key points (from json:additional_key_points block)
+   * - Additional issues (from json:additional_issues block)
+   *
+   * @param raw The full LLM response text
+   */
+  static parseEnhanceResponse(raw: string): EnhanceParseResult {
+    logger.debug(`ResponseParser.parseEnhanceResponse: input length ${raw.length} chars`);
+
+    const sections = this._extractSections(raw);
+
+    // Extract the answer section
+    let answer = sections['answer'] || '';
+    if (!answer) {
+      // If no explicit ### Answer section, use the full response as the answer
+      // (stripping out any JSON blocks and other sections)
+      answer = raw
+        .replace(/```json:\w+[\s\S]*?```/g, '')
+        .replace(/^#{1,3}\s+(Updated Overview|Additional Key Points|Additional Issues)[\s\S]*$/gm, '')
+        .trim();
+    }
+    // Clean up: remove json blocks from answer
+    answer = answer.replace(/```json:\w+[\s\S]*?```/g, '').trim();
+
+    // Extract updated overview
+    const updatedOverview = sections['updated overview'] || null;
+
+    // Extract additional key points from json:additional_key_points block
+    let additionalKeyPoints: string[] = [];
+    const kpMatch = raw.match(/```json:additional_key_points\s*\n([\s\S]*?)\n\s*```/);
+    if (kpMatch) {
+      try {
+        const parsed = JSON.parse(kpMatch[1]);
+        if (Array.isArray(parsed)) {
+          additionalKeyPoints = parsed.filter((s): s is string => typeof s === 'string' && s.length > 0);
+        }
+      } catch (err) {
+        logger.warn(`ResponseParser.parseEnhanceResponse: JSON parse error for additional_key_points: ${err}`);
+      }
+    }
+
+    // Extract additional issues from json:additional_issues block
+    let additionalIssues: string[] = [];
+    const issueMatch = raw.match(/```json:additional_issues\s*\n([\s\S]*?)\n\s*```/);
+    if (issueMatch) {
+      try {
+        const parsed = JSON.parse(issueMatch[1]);
+        if (Array.isArray(parsed)) {
+          additionalIssues = parsed.filter((s): s is string => typeof s === 'string' && s.length > 0);
+        }
+      } catch (err) {
+        logger.warn(`ResponseParser.parseEnhanceResponse: JSON parse error for additional_issues: ${err}`);
+      }
+    }
+
+    logger.info(
+      `ResponseParser.parseEnhanceResponse: answer=${answer.length} chars, ` +
+        `updatedOverview=${updatedOverview ? 'yes' : 'no'}, ` +
+        `additionalKeyPoints=${additionalKeyPoints.length}, ` +
+        `additionalIssues=${additionalIssues.length}`
+    );
+
+    return {
+      answer,
+      updatedOverview,
+      additionalKeyPoints,
+      additionalIssues,
+    };
   }
 
   /**

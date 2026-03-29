@@ -19,6 +19,7 @@ import type {
   SymbolInfo,
   CursorContext,
   RelatedSymbolAnalysis,
+  QAEntry,
 } from '../models/types';
 import type { LLMProvider } from '../llm/LLMProvider';
 import type { CacheStore } from '../cache/CacheStore';
@@ -855,6 +856,177 @@ export class AnalysisOrchestrator {
     );
 
     return cachedCount;
+  }
+
+  /**
+   * Enhance an existing analysis with a user-provided prompt.
+   *
+   * Takes the current analysis and the user's question/request, sends both
+   * to the LLM as context, and returns an updated analysis with either:
+   * - Enhanced/updated existing sections (if the LLM modifies them)
+   * - A new Q&A entry appended to the qaHistory array
+   *
+   * The result is written back to cache so the Q&A persists across sessions.
+   *
+   * @param existingResult  The current AnalysisResult for this symbol
+   * @param userPrompt      The user's question or enhancement request
+   * @returns Updated AnalysisResult with the enhancement applied
+   */
+  async enhanceAnalysis(
+    existingResult: AnalysisResult,
+    userPrompt: string
+  ): Promise<AnalysisResult> {
+    const startTime = Date.now();
+    const symbol = existingResult.symbol;
+    const symbolKey = `${symbol.kind} "${symbol.name}" in ${symbol.filePath}`;
+    logger.info(`Orchestrator.enhanceAnalysis: ${symbolKey} — prompt: "${userPrompt.substring(0, 100)}"`);
+
+    // Start LLM call log
+    logger.startLLMCallLog(`enhance:${symbol.name}`, this._llmProvider.name);
+    logger.logLLMStep(`Starting enhance analysis of ${symbolKey}`);
+    logger.logLLMStep(`User prompt: "${userPrompt}"`);
+
+    // Check LLM availability
+    logger.logLLMStep(`Checking if LLM provider "${this._llmProvider.name}" is available...`);
+    const available = await this._llmProvider.isAvailable();
+    if (!available) {
+      logger.logLLMStep(`LLM provider "${this._llmProvider.name}" not available — cannot enhance`);
+      logger.warn(`Orchestrator.enhanceAnalysis: LLM provider not available`);
+
+      // Still add the Q&A entry with an error message
+      const qaEntry: QAEntry = {
+        question: userPrompt,
+        answer: 'LLM provider is not available. Please try again later.',
+        timestamp: new Date().toISOString(),
+      };
+      const updatedResult = {
+        ...existingResult,
+        qaHistory: [...(existingResult.qaHistory || []), qaEntry],
+      };
+      try {
+        await this._cache.write(updatedResult);
+      } catch (err) {
+        logger.warn(`Orchestrator.enhanceAnalysis: cache write failed: ${err}`);
+      }
+      return updatedResult;
+    }
+
+    // Read the source code for additional context
+    logger.logLLMStep('Reading symbol source code for context...');
+    const sourceCode = await withTimeout(
+      this._staticAnalyzer.readSymbolSource(symbol),
+      STATIC_ANALYSIS_TIMEOUT_MS,
+      '',
+      'readSymbolSource'
+    );
+    logger.logLLMStep(`Source code: ${sourceCode.length} chars`);
+
+    // Build the enhance prompt
+    logger.logLLMStep('Building enhance prompt...');
+    const prompt = PromptBuilder.buildEnhance(
+      existingResult,
+      userPrompt,
+      sourceCode
+    );
+    logger.logLLMStep(`Enhance prompt built (${prompt.length} chars), sending to ${this._llmProvider.name}...`);
+    logger.logLLMInput(prompt);
+
+    // Send to LLM
+    let rawResponse = '';
+    try {
+      logger.logLLMStep('Streaming real-time output below...');
+      logger.logLLMChunk('\n---\n\n## Real-time Output\n\n```\n');
+
+      rawResponse = await this._llmProvider.analyze({
+        prompt,
+        systemPrompt: PromptBuilder.SYSTEM_PROMPT,
+        maxTokens: 4096,
+      });
+
+      logger.logLLMChunk('\n```\n\n');
+      logger.logLLMStep(`Response received (${rawResponse.length} chars)`);
+      logger.logLLMOutput(rawResponse);
+    } catch (err) {
+      logger.logLLMStep(`Enhance LLM call FAILED: ${err}`);
+      logger.error(`Orchestrator.enhanceAnalysis: LLM call failed: ${err}`);
+
+      // Add error Q&A entry
+      const qaEntry: QAEntry = {
+        question: userPrompt,
+        answer: `Analysis enhancement failed: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: new Date().toISOString(),
+      };
+      const updatedResult = {
+        ...existingResult,
+        qaHistory: [...(existingResult.qaHistory || []), qaEntry],
+      };
+      try {
+        await this._cache.write(updatedResult);
+      } catch (writeErr) {
+        logger.warn(`Orchestrator.enhanceAnalysis: cache write failed: ${writeErr}`);
+      }
+      return updatedResult;
+    }
+
+    // Parse the enhance response
+    logger.logLLMStep('Parsing enhance response...');
+    const enhanceResult = ResponseParser.parseEnhanceResponse(rawResponse);
+    logger.logLLMStep(
+      `Parsed enhance response — answer: ${enhanceResult.answer.length} chars, ` +
+        `updatedOverview: ${enhanceResult.updatedOverview ? 'yes' : 'no'}, ` +
+        `additionalKeyPoints: ${enhanceResult.additionalKeyPoints.length}, ` +
+        `additionalIssues: ${enhanceResult.additionalIssues.length}`
+    );
+
+    // Build the Q&A entry
+    const qaEntry: QAEntry = {
+      question: userPrompt,
+      answer: enhanceResult.answer,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Merge enhancements into the existing result
+    const updatedResult: AnalysisResult = {
+      ...existingResult,
+      qaHistory: [...(existingResult.qaHistory || []), qaEntry],
+    };
+
+    // Optionally update overview if the LLM provided an enhanced one
+    if (enhanceResult.updatedOverview) {
+      updatedResult.overview = enhanceResult.updatedOverview;
+    }
+
+    // Append additional key points
+    if (enhanceResult.additionalKeyPoints.length > 0) {
+      updatedResult.keyMethods = [
+        ...(updatedResult.keyMethods || []),
+        ...enhanceResult.additionalKeyPoints,
+      ];
+    }
+
+    // Append additional potential issues
+    if (enhanceResult.additionalIssues.length > 0) {
+      updatedResult.potentialIssues = [
+        ...(updatedResult.potentialIssues || []),
+        ...enhanceResult.additionalIssues,
+      ];
+    }
+
+    // Write updated result back to cache
+    logger.logLLMStep('Writing enhanced result to cache...');
+    try {
+      await this._cache.write(updatedResult);
+      logger.logLLMStep('Cache write successful');
+    } catch (err) {
+      logger.logLLMStep(`Cache write FAILED: ${err}`);
+      logger.warn(`Orchestrator.enhanceAnalysis: cache write failed: ${err}`);
+    }
+
+    const elapsed = Date.now() - startTime;
+    logger.logLLMStep(`Enhance analysis complete in ${elapsed}ms`);
+    logger.info(`Orchestrator.enhanceAnalysis: complete for "${symbol.name}" in ${elapsed}ms`);
+
+    return updatedResult;
   }
 
   dispose(): void {

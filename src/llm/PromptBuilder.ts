@@ -9,7 +9,7 @@
  * and analysis in a single LLM call, avoiding the expensive
  * VS Code symbol resolution stage.
  */
-import type { SymbolInfo, CursorContext } from '../models/types';
+import type { SymbolInfo, CursorContext, AnalysisResult } from '../models/types';
 import type { PromptStrategy, PromptContext } from './prompts/PromptStrategy';
 import { FunctionPromptStrategy } from './prompts/FunctionPromptStrategy';
 import { VariablePromptStrategy } from './prompts/VariablePromptStrategy';
@@ -539,6 +539,127 @@ Output a single machine-readable JSON block listing ALL symbol analyses for this
 8. **Cache file path**: Must follow the naming convention exactly so the extension can look up these entries later.
 9. **Line numbers**: Use 0-based line numbers matching the source code.
 10. **Be accurate**: Only state facts you can determine from the source code. Don't hallucinate callers or dependencies.`;
+  }
+
+  /**
+   * Build a prompt to enhance an existing analysis based on the user's
+   * question or enhancement request.
+   *
+   * Provides the existing analysis and source code as context so the LLM
+   * can give an informed, targeted answer. The response may include:
+   * - A direct answer to the user's question
+   * - An updated overview (if requested)
+   * - Additional key points or potential issues discovered
+   *
+   * @param existingResult  The current analysis result for the symbol
+   * @param userPrompt      The user's question or enhancement request
+   * @param sourceCode      Source code of the symbol (for context)
+   */
+  static buildEnhance(
+    existingResult: AnalysisResult,
+    userPrompt: string,
+    sourceCode: string
+  ): string {
+    const symbol = existingResult.symbol;
+    const lang = this._guessLanguage(symbol.filePath);
+
+    logger.debug(
+      `PromptBuilder.buildEnhance: ${symbol.kind} "${symbol.name}" — ` +
+        `prompt: "${userPrompt.substring(0, 80)}...", ` +
+        `source: ${sourceCode.length} chars`
+    );
+
+    // Build a summary of the existing analysis for context
+    const existingSummary: string[] = [];
+    if (existingResult.overview) {
+      existingSummary.push(`**Overview:** ${existingResult.overview}`);
+    }
+    if (existingResult.keyMethods && existingResult.keyMethods.length > 0) {
+      existingSummary.push(`**Key Points:** ${existingResult.keyMethods.join('; ')}`);
+    }
+    if (existingResult.functionSteps && existingResult.functionSteps.length > 0) {
+      existingSummary.push(`**Steps:** ${existingResult.functionSteps.map(s => `${s.step}. ${s.description}`).join(' ')}`);
+    }
+    if (existingResult.subFunctions && existingResult.subFunctions.length > 0) {
+      existingSummary.push(`**Sub-Functions:** ${existingResult.subFunctions.map(sf => sf.name).join(', ')}`);
+    }
+    if (existingResult.dependencies && existingResult.dependencies.length > 0) {
+      existingSummary.push(`**Dependencies:** ${existingResult.dependencies.join(', ')}`);
+    }
+    if (existingResult.potentialIssues && existingResult.potentialIssues.length > 0) {
+      existingSummary.push(`**Potential Issues:** ${existingResult.potentialIssues.join('; ')}`);
+    }
+    if (existingResult.classMembers && existingResult.classMembers.length > 0) {
+      existingSummary.push(`**Class Members:** ${existingResult.classMembers.map(m => `${m.visibility} ${m.memberKind} ${m.name}: ${m.typeName}`).join('; ')}`);
+    }
+
+    // Include previous Q&A for context continuity
+    let qaContext = '';
+    if (existingResult.qaHistory && existingResult.qaHistory.length > 0) {
+      qaContext = '\n\n## Previous Q&A History\n\n';
+      for (const qa of existingResult.qaHistory) {
+        qaContext += `**Q:** ${qa.question}\n**A:** ${qa.answer}\n\n`;
+      }
+    }
+
+    return `You are enhancing an existing code analysis based on a user's question or request. You have full context about the symbol and the codebase.
+
+## Symbol Under Analysis
+
+- **Name:** ${symbol.name}
+- **Kind:** ${symbol.kind}
+- **File:** ${symbol.filePath}
+- **Line:** ${symbol.position.line + 1}
+
+## Existing Analysis
+
+${existingSummary.join('\n\n')}
+${qaContext}
+## Source Code
+
+\`\`\`${lang}
+${sourceCode}
+\`\`\`
+
+## User's Question / Enhancement Request
+
+${userPrompt}
+
+## Instructions
+
+Respond to the user's question or enhancement request based on the symbol analysis and source code above. Your response should be:
+
+1. **Thorough and specific** — reference actual code, line numbers, and concrete details from the source
+2. **Contextual** — build on the existing analysis, don't repeat what's already known
+3. **Actionable** — if the user asks about improvements, give concrete suggestions
+
+### Answer
+
+Provide a clear, detailed answer to the user's question. Use markdown formatting for readability (bullet points, code blocks, bold for emphasis). This is the main content that will be stored as a Q&A entry.
+
+### Updated Overview
+
+If your answer reveals information that should update the symbol's overview, provide an updated overview below. If no update is needed, omit this section entirely.
+
+### Additional Key Points
+
+If you discover additional key points about this symbol that weren't in the original analysis, list them as a JSON array:
+
+\`\`\`json:additional_key_points
+["New key point 1", "New key point 2"]
+\`\`\`
+
+If none, output an empty array: \`\`\`json:additional_key_points\n[]\n\`\`\`
+
+### Additional Issues
+
+If you discover additional potential issues, list them:
+
+\`\`\`json:additional_issues
+["New issue 1"]
+\`\`\`
+
+If none, output an empty array: \`\`\`json:additional_issues\n[]\n\`\`\``;
   }
 
   /**

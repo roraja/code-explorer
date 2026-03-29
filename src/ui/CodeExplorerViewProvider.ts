@@ -14,7 +14,10 @@ import type {
   WebviewToExtensionMessage,
 } from '../models/types';
 import type { AnalysisOrchestrator } from '../analysis/AnalysisOrchestrator';
+import type { CacheStore } from '../cache/CacheStore';
 import { logger } from '../utils/logger';
+import { TabSessionStore } from './TabSessionStore';
+import type { PersistedTab } from './TabSessionStore';
 
 export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'codeExplorer.sidebar';
@@ -24,11 +27,19 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
   private _activeTabId: string | null = null;
   private _tabCounter = 0;
   private _webviewReady = false;
+  private readonly _sessionStore: TabSessionStore | null;
+  private readonly _cacheStore: CacheStore | null;
+  private _sessionRestored = false;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
-    private readonly _orchestrator: AnalysisOrchestrator | null
-  ) {}
+    private readonly _orchestrator: AnalysisOrchestrator | null,
+    cacheStore?: CacheStore | null,
+    workspaceRoot?: string
+  ) {
+    this._cacheStore = cacheStore ?? null;
+    this._sessionStore = workspaceRoot ? new TabSessionStore(workspaceRoot) : null;
+  }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -59,6 +70,12 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       this._view = undefined;
       this._webviewReady = false;
     });
+
+    // Restore previously saved tab session (only on first resolve)
+    if (!this._sessionRestored) {
+      this._sessionRestored = true;
+      this._restoreSession();
+    }
   }
 
   /**
@@ -244,6 +261,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
   /**
    * Push the full state to the webview. This is the ONLY way
    * state reaches the webview — no incremental messages.
+   *
+   * Also persists the current tab session to disk so it can
+   * be restored on window reload.
    */
   private _pushState(): void {
     const msg = {
@@ -251,6 +271,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       tabs: this._tabs,
       activeTabId: this._activeTabId,
     };
+
+    // Persist tab session on every state change
+    this._persistSession();
 
     if (!this._view || !this._webviewReady) {
       logger.debug(
@@ -264,6 +287,127 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       `ViewProvider._pushState: sending ${this._tabs.length} tabs, active=${this._activeTabId}`
     );
     this._view.webview.postMessage(msg);
+  }
+
+  /**
+   * Persist current tab state to disk for session restore.
+   * Only persists "ready" tabs that have analysis results —
+   * loading/error tabs are transient.
+   */
+  private _persistSession(): void {
+    if (!this._sessionStore) {
+      return;
+    }
+
+    const readyTabs: PersistedTab[] = this._tabs
+      .filter((t) => t.status === 'ready' && t.analysis)
+      .map((t) => ({
+        id: t.id,
+        symbol: t.symbol,
+      }));
+
+    if (readyTabs.length === 0) {
+      this._sessionStore.clear();
+      return;
+    }
+
+    // Ensure activeTabId points to a persisted tab; otherwise pick the last one
+    const activeId =
+      this._activeTabId && readyTabs.some((t) => t.id === this._activeTabId)
+        ? this._activeTabId
+        : readyTabs[readyTabs.length - 1].id;
+
+    this._sessionStore.save(readyTabs, activeId);
+  }
+
+  /**
+   * Restore tabs from a previously saved session file.
+   * For each persisted tab, reads the cached analysis from the CacheStore.
+   * Tabs whose cache has been cleared are silently skipped.
+   */
+  private _restoreSession(): void {
+    if (!this._sessionStore || !this._cacheStore) {
+      logger.debug('ViewProvider._restoreSession: no session store or cache store, skipping');
+      return;
+    }
+
+    const session = this._sessionStore.load();
+    if (!session || session.tabs.length === 0) {
+      logger.debug('ViewProvider._restoreSession: no saved session or empty tabs');
+      return;
+    }
+
+    logger.info(
+      `ViewProvider._restoreSession: restoring ${session.tabs.length} tabs from session`
+    );
+
+    // Restore tabs asynchronously — read cache for each persisted tab
+    this._restoreTabsAsync(session).catch((err) => {
+      logger.warn(`ViewProvider._restoreSession: failed: ${err}`);
+    });
+  }
+
+  /**
+   * Asynchronously restore tabs by reading their cached analysis.
+   * Tabs are restored in order. Tabs without cached data are skipped.
+   */
+  private async _restoreTabsAsync(
+    session: import('./TabSessionStore').TabSession
+  ): Promise<void> {
+    if (!this._cacheStore) {
+      return;
+    }
+
+    let restoredCount = 0;
+    const idMap = new Map<string, string>(); // old ID → new ID
+
+    for (const persistedTab of session.tabs) {
+      try {
+        const result = await this._cacheStore.read(persistedTab.symbol);
+        if (!result) {
+          logger.debug(
+            `ViewProvider._restoreTabsAsync: cache miss for "${persistedTab.symbol.name}", skipping`
+          );
+          continue;
+        }
+
+        const newId = `tab-${++this._tabCounter}`;
+        idMap.set(persistedTab.id, newId);
+
+        const tab: TabState = {
+          id: newId,
+          symbol: persistedTab.symbol,
+          status: 'ready',
+          analysis: result,
+        };
+
+        this._tabs.push(tab);
+        restoredCount++;
+      } catch (err) {
+        logger.warn(
+          `ViewProvider._restoreTabsAsync: failed to restore tab for ` +
+            `"${persistedTab.symbol.name}": ${err}`
+        );
+      }
+    }
+
+    if (restoredCount > 0) {
+      // Restore active tab ID (mapped to new ID), or default to last tab
+      const mappedActiveId = session.activeTabId
+        ? idMap.get(session.activeTabId) ?? null
+        : null;
+      this._activeTabId =
+        mappedActiveId ?? (this._tabs.length > 0 ? this._tabs[this._tabs.length - 1].id : null);
+
+      logger.info(
+        `ViewProvider._restoreTabsAsync: restored ${restoredCount} tabs, ` +
+          `active=${this._activeTabId}`
+      );
+      this._pushState();
+    } else {
+      logger.info('ViewProvider._restoreTabsAsync: no tabs could be restored (all cache misses)');
+      this._sessionStore?.clear();
+    }
   }
 
   private _handleMessage(message: WebviewToExtensionMessage): void {

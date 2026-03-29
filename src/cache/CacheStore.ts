@@ -938,9 +938,7 @@ If no match, output:
       }>(body, 'function_inputs');
       const functionInputs =
         fnInputsRaw.length > 0
-          ? fnInputsRaw.filter(
-              (f) => typeof f.name === 'string' && typeof f.typeName === 'string'
-            )
+          ? fnInputsRaw.filter((f) => typeof f.name === 'string' && typeof f.typeName === 'string')
           : undefined;
 
       // Parse function output from json:function_output block

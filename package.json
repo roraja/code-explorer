@@ -2,7 +2,7 @@
   "name": "code-explorer",
   "displayName": "Code Explorer",
   "description": "AI-powered code intelligence sidebar for VS Code — deep symbol analysis, call stacks, usage tracking, and data flow visualization.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "code-explorer-team",
   "license": "MIT",
   "repository": {

@@ -33,6 +33,7 @@ let _logDir: string | undefined;
 let _logStream: fs.WriteStream | undefined;
 let _currentLogDate: string | undefined;
 let _sessionId: string | undefined;
+let _extensionVersion: string | undefined;
 let _llmCallCounter = 0;
 let _llmLogDir: string | undefined;
 let _activeLLMLogFile: string | undefined;
@@ -79,9 +80,10 @@ function getLogStream(): fs.WriteStream | undefined {
       _logStream = fs.createWriteStream(filePath, { flags: 'a' });
 
       // Write session header on first open
+      const versionStr = _extensionVersion ? `  v${_extensionVersion}` : '';
       _logStream.write(
         `\n${'─'.repeat(72)}\n` +
-          `Session ${_sessionId}  started ${new Date().toISOString()}\n` +
+          `Session ${_sessionId}${versionStr}  started ${new Date().toISOString()}\n` +
           `${'─'.repeat(72)}\n`
       );
     } catch {
@@ -141,11 +143,12 @@ export const logger = {
    * Call once during activation with the workspace root path.
    * Creates .vscode/code-explorer/logs/ if it does not exist.
    */
-  init(workspaceRoot: string): void {
+  init(workspaceRoot: string, version?: string): void {
     _logDir = path.join(workspaceRoot, '.vscode', CACHE.DIR_NAME, 'logs');
     _llmLogDir = path.join(_logDir, 'llms');
     _llmCallCounter = 0;
     _sessionId = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+    _extensionVersion = version;
 
     // Force-write the first line so the file is created immediately
     const stream = getLogStream();

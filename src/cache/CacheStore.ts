@@ -11,10 +11,30 @@
  */
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { AnalysisResult, SymbolInfo, SymbolKindType, AnalysisMetadata, CallStackEntry, UsageEntry, DataFlowEntry, ClassMemberInfo } from '../models/types';
+import type { AnalysisResult, SymbolInfo, SymbolKindType, AnalysisMetadata, CursorContext, CallStackEntry, UsageEntry, DataFlowEntry, ClassMemberInfo } from '../models/types';
 import { SYMBOL_KIND_PREFIX } from '../models/types';
-import { CACHE, ANALYSIS_VERSION } from '../models/constants';
+import { CACHE, ANALYSIS_VERSION, CACHE_FALLBACK_LLM_TIMEOUT_MS } from '../models/constants';
 import { logger } from '../utils/logger';
+import { runCLI } from '../utils/cli';
+
+/**
+ * Summary of a cached symbol — lightweight metadata used for
+ * the LLM-assisted cache fallback search.
+ */
+export interface CachedSymbolSummary {
+  /** Cache file name (e.g. "fn.printBanner.md") */
+  fileName: string;
+  /** Symbol name from frontmatter */
+  name: string;
+  /** Symbol kind from frontmatter */
+  kind: SymbolKindType;
+  /** Line number from frontmatter */
+  line: number;
+  /** Scope chain from frontmatter (dot-separated) */
+  scopeChain: string[];
+  /** First ~150 chars of the overview section, if available */
+  overviewSnippet: string;
+}
 
 export class CacheStore {
   private readonly _cacheRoot: string;
@@ -220,6 +240,293 @@ export class CacheStore {
         `no match for symbol="${word}" near line ${cursorLine}`
     );
     return null;
+  }
+
+  // ── LLM-Assisted Cache Fallback ──────────────────────────
+
+  /**
+   * List all cached symbols for a given source file.
+   *
+   * Reads the YAML frontmatter and a snippet of the overview from each
+   * `.md` cache file. This is intentionally lightweight — no full
+   * deserialization — because the result is sent to a fast LLM call
+   * for matching.
+   *
+   * @param filePath  Relative path to the source file from workspace root
+   * @returns Array of CachedSymbolSummary for all cached symbols in that file
+   */
+  async listCachedSymbols(filePath: string): Promise<CachedSymbolSummary[]> {
+    const cacheDir = path.join(this._cacheRoot, filePath);
+    logger.debug(`CacheStore.listCachedSymbols: scanning ${cacheDir}`);
+
+    let entries: string[];
+    try {
+      entries = await fs.readdir(cacheDir);
+    } catch {
+      logger.debug(`CacheStore.listCachedSymbols: directory does not exist: ${cacheDir}`);
+      return [];
+    }
+
+    const mdFiles = entries.filter((e) => e.endsWith('.md'));
+    if (mdFiles.length === 0) {
+      return [];
+    }
+
+    const summaries: CachedSymbolSummary[] = [];
+
+    for (const mdFile of mdFiles) {
+      const fullPath = path.join(cacheDir, mdFile);
+      let content: string;
+      try {
+        content = await fs.readFile(fullPath, 'utf-8');
+      } catch {
+        continue;
+      }
+
+      const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      if (!fmMatch) {
+        continue;
+      }
+
+      const fm = this._parseFrontmatter(fmMatch[1]);
+      const name = fm['symbol'] || '';
+      const kind = (fm['kind'] || 'unknown') as SymbolKindType;
+      const line = parseInt(fm['line'] || '', 10);
+      const scopeChain = fm['scope_chain']
+        ? fm['scope_chain'].split('.')
+        : [];
+
+      if (!name || isNaN(line)) {
+        continue;
+      }
+
+      // Extract a short overview snippet (first ~150 chars of the ## Overview section)
+      let overviewSnippet = '';
+      const overviewMatch = content.match(/## Overview\s*\n+([\s\S]*?)(?=\n##|\n```|$)/);
+      if (overviewMatch) {
+        overviewSnippet = overviewMatch[1].trim().substring(0, 150);
+      }
+
+      summaries.push({ fileName: mdFile, name, kind, line, scopeChain, overviewSnippet });
+    }
+
+    logger.debug(`CacheStore.listCachedSymbols: found ${summaries.length} cached symbols in ${filePath}`);
+    return summaries;
+  }
+
+  /**
+   * Attempt to find a cached analysis for a cursor position by using
+   * a lightweight LLM call as a fallback when `findByCursor` misses.
+   *
+   * Flow:
+   * 1. Try `findByCursor(word, filePath, cursorLine)` — exact name + ±3 lines.
+   * 2. On miss, collect all cached symbol summaries for this source file.
+   * 3. If there are cached symbols, send a lightweight Copilot Agent call
+   *    (fast, cheap — 30s timeout) asking the LLM to pick the best match
+   *    from the cache given the cursor's code context.
+   * 4. If the LLM identifies a match, deserialize and return that cached result.
+   * 5. If no match, return null — caller should proceed with full analysis.
+   *
+   * @param cursor       CursorContext with word, filePath, position, surrounding source
+   * @param workspaceRoot  Workspace root path for spawning the CLI process
+   * @returns Matched cached result, or null if no match found
+   */
+  async findByCursorWithLLMFallback(
+    cursor: CursorContext,
+    workspaceRoot: string
+  ): Promise<{ symbol: SymbolInfo; result: AnalysisResult } | null> {
+    // Step 1: Try the fast exact-match first
+    const exactMatch = await this.findByCursor(
+      cursor.word,
+      cursor.filePath,
+      cursor.position.line
+    );
+    if (exactMatch) {
+      return exactMatch;
+    }
+
+    // Step 2: Collect cached symbols for this file
+    const cachedSymbols = await this.listCachedSymbols(cursor.filePath);
+    if (cachedSymbols.length === 0) {
+      logger.info(
+        `CacheStore.findByCursorWithLLMFallback: no cached symbols for ${cursor.filePath} — skipping LLM fallback`
+      );
+      return null;
+    }
+
+    logger.info(
+      `CacheStore.findByCursorWithLLMFallback: findByCursor missed, ` +
+        `trying LLM fallback with ${cachedSymbols.length} cached symbols ` +
+        `for "${cursor.word}" at ${cursor.filePath}:${cursor.position.line}`
+    );
+
+    // Step 3: Build the lightweight prompt for the LLM
+    const symbolListText = cachedSymbols
+      .map((s, i) => {
+        const scope = s.scopeChain.length > 0 ? ` (scope: ${s.scopeChain.join('.')})` : '';
+        const overview = s.overviewSnippet ? ` — ${s.overviewSnippet}` : '';
+        return `  ${i + 1}. [${s.kind}] "${s.name}" at line ${s.line}${scope}${overview}`;
+      })
+      .join('\n');
+
+    const prompt = `You are helping match a code symbol at the user's cursor to an existing cached analysis.
+
+## Cursor Context
+- **Word at cursor**: "${cursor.word}"
+- **File**: ${cursor.filePath}
+- **Line**: ${cursor.position.line + 1}
+- **Cursor line**: \`${cursor.cursorLine}\`
+
+## Surrounding Code (±50 lines)
+\`\`\`
+${cursor.surroundingSource}
+\`\`\`
+
+## Cached Symbols in This File
+${symbolListText}
+
+## Task
+Look at the cursor context and determine which cached symbol (if any) the user is pointing at. The cursor may be on a usage, call, reference, or the definition itself of one of these cached symbols.
+
+Rules:
+- If the word at the cursor exactly matches a cached symbol name, prefer that match even if the line is different.
+- If the word is a method call (e.g., \`obj.foo()\`) and "foo" is in the cache as a method, match it.
+- If the word is a type annotation, constructor call, or class reference and a matching class/interface/type is cached, match it.
+- If the cursor is on a variable that was analyzed before (same name), match it even if the line shifted.
+- If none of the cached symbols are relevant, output "NONE".
+- Only output a match if you are confident — do not guess.
+
+Output ONLY a JSON block in this exact format:
+\`\`\`json:cache_match
+{
+  "matched_index": 1,
+  "confidence": "high",
+  "reason": "Brief explanation"
+}
+\`\`\`
+
+If no match, output:
+\`\`\`json:cache_match
+{
+  "matched_index": null,
+  "confidence": "none",
+  "reason": "No cached symbol matches the cursor context"
+}
+\`\`\``;
+
+    // Step 4: Send lightweight LLM call
+    let llmResponse = '';
+    try {
+      logger.logLLMStep(
+        `Cache fallback: sending lightweight LLM query ` +
+          `(${cachedSymbols.length} cached symbols, ${prompt.length} char prompt)`
+      );
+
+      llmResponse = await runCLI({
+        command: 'copilot',
+        args: ['--yolo', '-s', '--output-format', 'text'],
+        stdinData: `[System instructions: You are a code symbol matcher. Be concise. Output ONLY the requested JSON block, nothing else.]\n\n${prompt}`,
+        cwd: workspaceRoot,
+        timeoutMs: CACHE_FALLBACK_LLM_TIMEOUT_MS,
+        label: 'cache-fallback-llm',
+      });
+
+      logger.logLLMStep(`Cache fallback: LLM response received (${llmResponse.length} chars)`);
+    } catch (err) {
+      logger.info(
+        `CacheStore.findByCursorWithLLMFallback: lightweight LLM call failed: ${err}. ` +
+          `Falling through to full analysis.`
+      );
+      return null;
+    }
+
+    // Step 5: Parse the LLM's response
+    const matchBlock = llmResponse.match(/```json:cache_match\s*\n([\s\S]*?)\n\s*```/);
+    if (!matchBlock) {
+      logger.info(
+        'CacheStore.findByCursorWithLLMFallback: no json:cache_match block in LLM response — no match'
+      );
+      return null;
+    }
+
+    try {
+      const matchResult = JSON.parse(matchBlock[1]);
+      const matchedIndex = matchResult?.matched_index;
+      const confidence = matchResult?.confidence;
+      const reason = matchResult?.reason || '';
+
+      if (matchedIndex === null || matchedIndex === undefined || confidence === 'none') {
+        logger.info(
+          `CacheStore.findByCursorWithLLMFallback: LLM says no match. Reason: ${reason}`
+        );
+        return null;
+      }
+
+      // Validate the index (1-based from the prompt)
+      const idx = typeof matchedIndex === 'number' ? matchedIndex - 1 : -1;
+      if (idx < 0 || idx >= cachedSymbols.length) {
+        logger.warn(
+          `CacheStore.findByCursorWithLLMFallback: LLM returned invalid index ${matchedIndex} ` +
+            `(valid range: 1-${cachedSymbols.length})`
+        );
+        return null;
+      }
+
+      const matched = cachedSymbols[idx];
+      logger.info(
+        `CacheStore.findByCursorWithLLMFallback: LLM matched "${matched.name}" (${matched.kind}) ` +
+          `at line ${matched.line} — confidence: ${confidence}, reason: ${reason}`
+      );
+
+      // Step 6: Deserialize the matched cache file
+      const cacheDir = path.join(this._cacheRoot, cursor.filePath);
+      const fullPath = path.join(cacheDir, matched.fileName);
+      let content: string;
+      try {
+        content = await fs.readFile(fullPath, 'utf-8');
+      } catch (err) {
+        logger.warn(
+          `CacheStore.findByCursorWithLLMFallback: failed to read matched cache file ${fullPath}: ${err}`
+        );
+        return null;
+      }
+
+      const symbolInfo: SymbolInfo = {
+        name: matched.name,
+        kind: matched.kind,
+        filePath: cursor.filePath,
+        position: { line: matched.line, character: 0 },
+        containerName: matched.scopeChain.length > 0
+          ? matched.scopeChain[matched.scopeChain.length - 1]
+          : undefined,
+        scopeChain: matched.scopeChain,
+      };
+
+      const result = this._deserialize(content, symbolInfo);
+      if (!result) {
+        logger.warn(
+          `CacheStore.findByCursorWithLLMFallback: deserialization failed for ${matched.fileName}`
+        );
+        return null;
+      }
+
+      const age = Date.now() - new Date(result.metadata.analyzedAt).getTime();
+      const ageHours = Math.round(age / 3600000);
+
+      logger.info(
+        `CacheStore.findByCursorWithLLMFallback: HIT (LLM fallback) — ` +
+          `matched "${matched.name}" (${matched.kind}) at line ${matched.line} ` +
+          `in ${matched.fileName} (${ageHours}h old, ` +
+          `provider: ${result.metadata.llmProvider || 'static'})`
+      );
+
+      return { symbol: symbolInfo, result };
+    } catch (err) {
+      logger.warn(
+        `CacheStore.findByCursorWithLLMFallback: failed to parse LLM match response: ${err}`
+      );
+      return null;
+    }
   }
 
   // ── Write ───────────────────────────────────────────────

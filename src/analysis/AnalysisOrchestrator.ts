@@ -45,7 +45,8 @@ export class AnalysisOrchestrator {
   constructor(
     private readonly _staticAnalyzer: StaticAnalyzer,
     private readonly _llmProvider: LLMProvider,
-    private readonly _cache: CacheStore
+    private readonly _cache: CacheStore,
+    private readonly _workspaceRoot?: string
   ) {}
 
   /**
@@ -307,31 +308,41 @@ export class AnalysisOrchestrator {
     logger.startLLMCallLog(cursor.word, this._llmProvider.name);
     logger.logLLMStep(`Starting unified analysis (symbol resolution + analysis) for ${cursorKey}`);
 
-    // 1. Check cache BEFORE the LLM call — scan the cache directory
-    //    for a matching symbol name near the cursor line (±3 lines).
-    //    This avoids an expensive LLM round-trip for previously-analyzed symbols.
+    // 1. Check cache BEFORE the LLM call — first try exact match (name + ±3 lines),
+    //    then fall back to a lightweight LLM call that matches cursor context
+    //    against cached symbol descriptions.
     onProgress?.('cache-check');
     logger.logLLMStep(
       `CACHE CHECK: scanning cache directory for symbol="${cursor.word}" ` +
         `near line ${cursor.position.line} in ${cursor.filePath}...`
     );
     try {
-      const cached = await this._cache.findByCursor(
-        cursor.word,
-        cursor.filePath,
-        cursor.position.line
-      );
+      let cached: { symbol: SymbolInfo; result: AnalysisResult } | null = null;
+
+      if (this._workspaceRoot) {
+        // Use the LLM-assisted fallback path (includes findByCursor as first step)
+        cached = await this._cache.findByCursorWithLLMFallback(cursor, this._workspaceRoot);
+      } else {
+        // No workspace root available — use basic findByCursor only
+        cached = await this._cache.findByCursor(
+          cursor.word,
+          cursor.filePath,
+          cursor.position.line
+        );
+      }
+
       if (cached && !cached.result.metadata.stale && cached.result.metadata.llmProvider) {
         const elapsed = Date.now() - startTime;
+        const fallbackUsed = this._workspaceRoot ? ' (with LLM fallback available)' : '';
         logger.logLLMStep(
-          `CACHE HIT (cursor scan) — found cached ${cached.symbol.kind} "${cached.symbol.name}" ` +
+          `CACHE HIT${fallbackUsed} — found cached ${cached.symbol.kind} "${cached.symbol.name}" ` +
             `at line ${cached.symbol.position.line}. ` +
             `Provider: ${cached.result.metadata.llmProvider}, ` +
             `analyzed at: ${cached.result.metadata.analyzedAt}. ` +
             `Resolved in ${elapsed}ms — skipping LLM call.`
         );
         logger.info(
-          `Orchestrator: CACHE HIT (cursor scan) for "${cursor.word}" — ` +
+          `Orchestrator: CACHE HIT for "${cursor.word}" — ` +
             `matched ${cached.symbol.kind} "${cached.symbol.name}" ` +
             `(provider: ${cached.result.metadata.llmProvider}). No LLM call needed.`
         );
@@ -349,14 +360,14 @@ export class AnalysisOrchestrator {
         );
       } else {
         logger.logLLMStep(
-          `CACHE MISS (cursor scan) — no matching cache file found ` +
+          `CACHE MISS (cursor scan + LLM fallback) — no matching cache file found ` +
             `for symbol="${cursor.word}" near line ${cursor.position.line}. ` +
-            `Will run LLM analysis.`
+            `Will run full LLM analysis.`
         );
       }
     } catch (err) {
       logger.logLLMStep(`CACHE ERROR during cursor scan: ${err}. Treating as cache miss.`);
-      logger.debug(`Orchestrator: cache findByCursor error: ${err}`);
+      logger.debug(`Orchestrator: cache findByCursorWithLLMFallback error: ${err}`);
     }
 
     // 2. Build unified prompt (resolution + analysis in one call)

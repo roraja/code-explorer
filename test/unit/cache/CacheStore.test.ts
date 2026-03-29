@@ -1,8 +1,10 @@
 /**
- * Code Explorer — Unit Tests for CacheStore.findByCursor
+ * Code Explorer — Unit Tests for CacheStore.findByCursor and LLM Fallback
  *
  * Tests the fuzzy cursor-based cache lookup that scans the cache
- * directory for matching symbol names within ±3 lines.
+ * directory for matching symbol names within ±3 lines, plus the
+ * LLM-assisted cache fallback that matches cursor context against
+ * cached symbol descriptions.
  */
 import * as assert from 'assert';
 import * as fs from 'fs/promises';
@@ -206,6 +208,160 @@ suite('CacheStore', () => {
       const found = await store.findByCursor('staleFunc', 'src/stale.ts', 5);
       assert.ok(found, 'Should return stale entry (caller decides)');
       assert.strictEqual(found!.result.metadata.stale, true);
+    });
+  });
+
+  suite('listCachedSymbols', () => {
+    test('returns all cached symbols for a source file', async () => {
+      // Write two symbols in the same source file
+      const sym1: SymbolInfo = {
+        name: 'FooClass',
+        kind: 'class',
+        filePath: 'src/foo.ts',
+        position: { line: 5, character: 0 },
+      };
+      const sym2: SymbolInfo = {
+        name: 'barMethod',
+        kind: 'method',
+        filePath: 'src/foo.ts',
+        position: { line: 20, character: 0 },
+        scopeChain: ['FooClass'],
+        containerName: 'FooClass',
+      };
+      await store.write(makeResult(sym1, 'FooClass manages foo operations.'));
+      await store.write(makeResult(sym2, 'barMethod performs bar.'));
+
+      const symbols = await store.listCachedSymbols('src/foo.ts');
+      assert.strictEqual(symbols.length, 2, 'Should find 2 cached symbols');
+
+      // Check that both are present (order may vary)
+      const names = symbols.map((s) => s.name).sort();
+      assert.deepStrictEqual(names, ['FooClass', 'barMethod']);
+
+      // Check that overview snippets are extracted
+      const fooEntry = symbols.find((s) => s.name === 'FooClass');
+      assert.ok(fooEntry, 'FooClass should be in the list');
+      assert.strictEqual(fooEntry!.kind, 'class');
+      assert.strictEqual(fooEntry!.line, 5);
+      assert.ok(
+        fooEntry!.overviewSnippet.includes('FooClass manages foo'),
+        'Overview snippet should be extracted'
+      );
+
+      const barEntry = symbols.find((s) => s.name === 'barMethod');
+      assert.ok(barEntry, 'barMethod should be in the list');
+      assert.strictEqual(barEntry!.kind, 'method');
+      assert.deepStrictEqual(barEntry!.scopeChain, ['FooClass']);
+    });
+
+    test('returns empty array when cache directory does not exist', async () => {
+      const symbols = await store.listCachedSymbols('nonexistent/file.ts');
+      assert.strictEqual(symbols.length, 0);
+    });
+
+    test('returns empty array when cache directory has no .md files', async () => {
+      const cacheDir = path.join(store.cacheRoot, 'src', 'empty.ts');
+      await fs.mkdir(cacheDir, { recursive: true });
+      await fs.writeFile(path.join(cacheDir, 'not-a-cache.txt'), 'hello');
+
+      const symbols = await store.listCachedSymbols('src/empty.ts');
+      assert.strictEqual(symbols.length, 0);
+    });
+
+    test('skips files with invalid frontmatter', async () => {
+      const sym: SymbolInfo = {
+        name: 'validSym',
+        kind: 'function',
+        filePath: 'src/mixed.ts',
+        position: { line: 10, character: 0 },
+      };
+      await store.write(makeResult(sym, 'Valid symbol.'));
+
+      // Write an invalid cache file in the same directory
+      const cacheDir = path.join(store.cacheRoot, 'src', 'mixed.ts');
+      await fs.writeFile(
+        path.join(cacheDir, 'fn.broken.md'),
+        'This file has no frontmatter at all.'
+      );
+
+      const symbols = await store.listCachedSymbols('src/mixed.ts');
+      assert.strictEqual(symbols.length, 1, 'Should only return the valid symbol');
+      assert.strictEqual(symbols[0].name, 'validSym');
+    });
+
+    test('truncates overview snippet to ~150 chars', async () => {
+      const longOverview = 'A'.repeat(300);
+      const sym: SymbolInfo = {
+        name: 'longDoc',
+        kind: 'function',
+        filePath: 'src/long.ts',
+        position: { line: 1, character: 0 },
+      };
+      await store.write(makeResult(sym, longOverview));
+
+      const symbols = await store.listCachedSymbols('src/long.ts');
+      assert.strictEqual(symbols.length, 1);
+      assert.ok(
+        symbols[0].overviewSnippet.length <= 150,
+        `Overview snippet should be truncated (got ${symbols[0].overviewSnippet.length})`
+      );
+    });
+  });
+
+  suite('findByCursorWithLLMFallback', () => {
+    test('returns exact match from findByCursor without invoking LLM', async () => {
+      // Write a cache entry
+      const sym: SymbolInfo = {
+        name: 'exactMatch',
+        kind: 'function',
+        filePath: 'src/exact.ts',
+        position: { line: 10, character: 0 },
+      };
+      await store.write(makeResult(sym, 'Exact match function.'));
+
+      const cursor = {
+        word: 'exactMatch',
+        filePath: 'src/exact.ts',
+        position: { line: 11, character: 0 },
+        surroundingSource: 'function exactMatch() {}',
+        cursorLine: 'function exactMatch() {}',
+      };
+
+      // Should find via findByCursor and never call the LLM
+      const found = await store.findByCursorWithLLMFallback(cursor, tmpDir);
+      assert.ok(found, 'Should find via exact match');
+      assert.strictEqual(found!.symbol.name, 'exactMatch');
+      assert.strictEqual(found!.result.overview, 'Exact match function.');
+    });
+
+    test('returns null when no cache directory exists (no LLM call)', async () => {
+      const cursor = {
+        word: 'missing',
+        filePath: 'nonexistent/file.ts',
+        position: { line: 5, character: 0 },
+        surroundingSource: 'const missing = 42;',
+        cursorLine: 'const missing = 42;',
+      };
+
+      const found = await store.findByCursorWithLLMFallback(cursor, tmpDir);
+      assert.strictEqual(found, null, 'Should return null — no cache dir');
+    });
+
+    test('returns null when no cached symbols exist for the file', async () => {
+      // Create cache dir but with no .md files
+      const cacheDir = path.join(store.cacheRoot, 'src', 'empty.ts');
+      await fs.mkdir(cacheDir, { recursive: true });
+
+      const cursor = {
+        word: 'nope',
+        filePath: 'src/empty.ts',
+        position: { line: 1, character: 0 },
+        surroundingSource: 'const nope = 0;',
+        cursorLine: 'const nope = 0;',
+      };
+
+      const found = await store.findByCursorWithLLMFallback(cursor, tmpDir);
+      assert.strictEqual(found, null, 'Should return null — no cached symbols');
     });
   });
 });

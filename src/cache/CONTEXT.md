@@ -72,6 +72,20 @@ Used by the primary `analyzeFromCursor` flow where the symbol kind is not yet kn
 
 Includes extensive debug logging at every step (directory listing, each file checked, name/line comparisons, match details).
 
+### `listCachedSymbols(filePath)` — Lightweight Metadata Scan
+
+Lists all cached symbols for a given source file by reading YAML frontmatter + a short overview snippet (~150 chars) from each `.md` cache file. Returns `CachedSymbolSummary[]`. Used by the LLM-assisted cache fallback to describe available cached symbols to the LLM.
+
+### `findByCursorWithLLMFallback(cursor, workspaceRoot)` — Smart Cache Lookup
+
+Two-tier cache lookup used as the primary entry point in `analyzeFromCursor`:
+
+1. **Tier 1**: Calls `findByCursor(word, filePath, cursorLine)` — fast, exact name + ±3 lines.
+2. **Tier 2** (on miss): If `listCachedSymbols` finds any cached symbols for this file, sends a **lightweight Copilot CLI call** (30s timeout, `--yolo -s`) with the cursor context and a numbered list of cached symbol descriptions. The LLM outputs a `json:cache_match` block identifying which cached symbol (if any) matches the cursor. On match, deserializes and returns the cached result.
+3. If both tiers miss, returns `null` — the orchestrator proceeds with full LLM analysis.
+
+The Tier 2 LLM call is cheap and fast because it only asks the LLM to match against a short list of descriptions — no code analysis is performed. This avoids expensive full re-analysis when the user clicks on a reference/usage of a previously-analyzed symbol, or when line numbers have shifted slightly due to edits.
+
 ## Cache Key Resolution
 
 `_buildCacheKey(symbol)` builds a unique key from:

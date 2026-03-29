@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release VSIX
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Package VSIX
+        run: npm run package
+
+      - name: Get VSIX filename
+        id: vsix
+        run: echo "filename=$(ls *.vsix)" >> "$GITHUB_OUTPUT"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Code Explorer v${{ steps.version.outputs.version }}
+          body: |
+            ## Code Explorer v${{ steps.version.outputs.version }}
+
+            ### Installation
+
+            Download `${{ steps.vsix.outputs.filename }}` below and install:
+
+            ```bash
+            code --install-extension ${{ steps.vsix.outputs.filename }}
+            ```
+
+            Or install directly via CLI:
+
+            ```bash
+            curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ steps.vsix.outputs.filename }}" -o /tmp/code-explorer.vsix && code --install-extension /tmp/code-explorer.vsix && rm /tmp/code-explorer.vsix
+            ```
+
+            Then reload VS Code and look for the **Code Explorer** icon in the activity bar.
+          files: ${{ steps.vsix.outputs.filename }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true

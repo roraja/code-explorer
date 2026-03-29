@@ -37,6 +37,7 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Explore Symbol command         | Implemented | `extension.ts`, `CodeExplorerViewProvider.ts` |
 | LLM-based symbol resolution (unified prompt) | Implemented | `PromptBuilder.ts`, `ResponseParser.ts`, `AnalysisOrchestrator.ts` |
 | Cursor-based cache lookup (fuzzy match) | Implemented | `CacheStore.ts` (`findByCursor`) |
+| LLM-assisted cache fallback (smart match) | Implemented | `CacheStore.ts` (`findByCursorWithLLMFallback`, `listCachedSymbols`) |
 | Sidebar webview with tabs      | Implemented | `CodeExplorerViewProvider.ts`, `webview/`      |
 | LLM analysis (copilot-cli)     | Implemented | `CopilotCLIProvider.ts`, `cli.ts`             |
 | LLM analysis (mai-claude)      | Implemented | `MaiClaudeProvider.ts`, `cli.ts`              |
@@ -79,7 +80,9 @@ User clicks symbol -> Ctrl+Shift+E
       -> CodeExplorerViewProvider.openTabFromCursor(cursor)
         -> posts 'setState' message to webview (shows loading spinner)
         -> AnalysisOrchestrator.analyzeFromCursor(cursor)
-          -> CacheStore.findByCursor() (fuzzy scan: name + ±3 lines)
+          -> CacheStore.findByCursorWithLLMFallback(cursor, workspaceRoot)
+            -> Tier 1: findByCursor() (name + ±3 lines) [FAST]
+            -> Tier 2: listCachedSymbols() + lightweight Copilot CLI match [~5-15s]
           -> PromptBuilder.buildUnified() (single prompt: identify + analyze)
           -> LLMProvider.analyze() (spawns CLI via runCLI, stdin pipe, workspace cwd)
           -> ResponseParser.parseSymbolIdentity() (extracts kind from response)

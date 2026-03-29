@@ -24,8 +24,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // --- Logger ---
   logger.setLevel(LogLevel.DEBUG);
-  logger.init(workspaceRoot);
+  const extensionVersion = context.extension.packageJSON.version ?? 'unknown';
+  logger.init(workspaceRoot, extensionVersion);
   context.subscriptions.push({ dispose: () => logger.dispose() });
+
+  logger.info(`Code Explorer v${extensionVersion}`);
   logger.info(`Activating with workspace: ${workspaceRoot}`);
 
   // --- Config ---
@@ -43,7 +46,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- Analysis Layer ---
   const staticAnalyzer = new StaticAnalyzer();
   const cacheStore = new CacheStore(workspaceRoot);
-  const orchestrator = new AnalysisOrchestrator(staticAnalyzer, llmProvider, cacheStore);
+  const orchestrator = new AnalysisOrchestrator(staticAnalyzer, llmProvider, cacheStore, workspaceRoot);
 
   context.subscriptions.push({ dispose: () => orchestrator.dispose() });
 

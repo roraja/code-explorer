@@ -82,5 +82,12 @@ export const QUEUE = {
 /** Timeout for individual static analysis operations (ms). */
 export const STATIC_ANALYSIS_TIMEOUT_MS = 15_000;
 
+/**
+ * Timeout for the lightweight LLM cache-fallback call (ms).
+ * This is a fast, cheap call to match a cursor against cached symbol descriptions.
+ * Set to 30 seconds — much shorter than the full analysis timeout (15 min).
+ */
+export const CACHE_FALLBACK_LLM_TIMEOUT_MS = 30_000;
+
 /** Analysis version identifier. */
 export const ANALYSIS_VERSION = '1.0.0';

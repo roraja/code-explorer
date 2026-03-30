@@ -24,6 +24,7 @@ export const COMMANDS = {
   PULL_ADO_CONTENT: 'codeExplorer.pullAdoContent',
   PUSH_ADO_CONTENT: 'codeExplorer.pushAdoContent',
   SHOW_DEPENDENCY_GRAPH: 'codeExplorer.showDependencyGraph',
+  SHOW_SYMBOL_INFO: 'codeExplorer.showSymbolInfo',
 } as const;
 
 /** Configuration setting keys (under "codeExplorer." namespace). */

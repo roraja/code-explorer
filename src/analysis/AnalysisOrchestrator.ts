@@ -31,6 +31,8 @@ import {
 } from '../llm/ResponseParser';
 import { StaticAnalyzer } from './StaticAnalyzer';
 import { ANALYSIS_VERSION, STATIC_ANALYSIS_TIMEOUT_MS } from '../models/constants';
+import { buildAddress } from '../indexing/SymbolAddress';
+import type { SymbolIndex } from '../indexing/SymbolIndex';
 import { logger } from '../utils/logger';
 
 /**
@@ -64,7 +66,8 @@ export class AnalysisOrchestrator {
     private readonly _staticAnalyzer: StaticAnalyzer,
     private readonly _llmProvider: LLMProvider,
     private readonly _cache: CacheStore,
-    private readonly _workspaceRoot?: string
+    private readonly _workspaceRoot?: string,
+    private readonly _symbolIndex?: SymbolIndex
   ) {}
 
   /**
@@ -334,12 +337,133 @@ export class AnalysisOrchestrator {
     logger.startLLMCallLog(cursor.word, this._llmProvider.name);
     logger.logLLMStep(`Starting unified analysis (symbol resolution + analysis) for ${cursorKey}`);
 
-    // 1. Check cache BEFORE the LLM call — first try exact match (name + ±3 lines),
-    //    then fall back to a lightweight LLM call that matches cursor context
-    //    against cached symbol descriptions.
+    // Track addresses that missed so we can promote the cache file if a later tier hits
+    const missedAddresses: string[] = [];
+
+    // 1. TIER 1: Try VS Code static analysis to resolve symbol (fast, deterministic, no LLM)
+    //    Uses definition provider + document symbol provider to get name, kind, scope chain.
     onProgress?.('cache-check');
     logger.logLLMStep(
-      `CACHE CHECK: scanning cache directory for symbol="${cursor.word}" ` +
+      `TIER 1: VS Code static analysis — resolving symbol at ${cursor.filePath}:${cursor.position.line}:${cursor.position.character}...`
+    );
+    const staticSymbol = await withTimeout(
+      this._staticAnalyzer.resolveSymbolAtPosition(
+        cursor.filePath,
+        cursor.position.line,
+        cursor.position.character,
+        cursor.word
+      ),
+      STATIC_ANALYSIS_TIMEOUT_MS,
+      null,
+      'resolveSymbolAtPosition'
+    );
+
+    if (staticSymbol && staticSymbol.kind !== 'unknown') {
+      logger.logLLMStep(
+        `TIER 1 HIT: VS Code resolved ${staticSymbol.kind} "${staticSymbol.name}" ` +
+          `at ${staticSymbol.filePath}:${staticSymbol.position.line}` +
+          (staticSymbol.scopeChain?.length ? ` scope=[${staticSymbol.scopeChain.join('.')}]` : '')
+      );
+
+      // Build symbol address for cache lookup (no line numbers — pure AST identity)
+      const address = buildAddress(
+        staticSymbol.filePath,
+        staticSymbol.scopeChain || [],
+        staticSymbol.kind,
+        staticSymbol.name
+      );
+
+      // Try address-based cache lookup (O(1), no directory scanning)
+      logger.logLLMStep(`TIER 1 CACHE: trying address-based lookup "${address}"...`);
+      const cachedByAddress = await this._cache.readByAddress(address, staticSymbol);
+      if (cachedByAddress && !cachedByAddress.metadata.stale && cachedByAddress.metadata.llmProvider) {
+        const elapsed = Date.now() - startTime;
+        logger.logLLMStep(
+          `TIER 1 CACHE HIT — found cached analysis via address "${address}". ` +
+            `Provider: ${cachedByAddress.metadata.llmProvider}, ` +
+            `analyzed at: ${cachedByAddress.metadata.analyzedAt}. ` +
+            `Resolved in ${elapsed}ms — no LLM call needed.`
+        );
+        logger.info(
+          `Orchestrator: TIER 1 HIT for "${staticSymbol.name}" — ` +
+            `static resolution + address cache (${elapsed}ms)`
+        );
+        this._onAnalysisComplete.fire(cachedByAddress);
+        return { symbol: staticSymbol, result: cachedByAddress };
+      }
+
+      // Also try the legacy cache lookup with the resolved SymbolInfo
+      // (covers cases where cache was written by old naming convention)
+      logger.logLLMStep(`TIER 1 CACHE FALLBACK: trying legacy cache with resolved SymbolInfo...`);
+      try {
+        const cachedByKey = await this._cache.read(staticSymbol);
+        if (cachedByKey && !cachedByKey.metadata.stale && cachedByKey.metadata.llmProvider) {
+          const elapsed = Date.now() - startTime;
+          logger.logLLMStep(
+            `TIER 1 LEGACY CACHE HIT — found cached analysis via SymbolInfo key. ` +
+              `Provider: ${cachedByKey.metadata.llmProvider}, ` +
+              `Resolved in ${elapsed}ms — no LLM call needed.`
+          );
+          this._onAnalysisComplete.fire(cachedByKey);
+          return { symbol: staticSymbol, result: cachedByKey };
+        }
+      } catch {
+        // Legacy cache read error — continue
+      }
+
+      logger.logLLMStep(
+        `TIER 1 CACHE MISS — no cached analysis for address "${address}". Will proceed to LLM.`
+      );
+      missedAddresses.push(address);
+    } else {
+      logger.logLLMStep(
+        `TIER 1 MISS — VS Code static analysis could not resolve symbol ` +
+          `(result: ${staticSymbol ? staticSymbol.kind : 'null'}). Falling through to Tier 2.`
+      );
+    }
+
+    // 2. TIER 2: Try tree-sitter symbol index if available
+    if (this._symbolIndex) {
+      logger.logLLMStep(
+        `TIER 2: tree-sitter index — resolving cursor at ${cursor.filePath}:${cursor.position.line}...`
+      );
+      const indexEntry = this._symbolIndex.resolveAtCursor(
+        cursor.filePath,
+        cursor.position.line,
+        cursor.position.character
+      );
+      if (indexEntry) {
+        logger.logLLMStep(
+          `TIER 2 HIT: tree-sitter resolved "${indexEntry.name}" ` +
+            `(${indexEntry.kind}) at address="${indexEntry.address}"`
+        );
+        const indexSymbol: SymbolInfo = {
+          name: indexEntry.name,
+          kind: indexEntry.kind,
+          filePath: indexEntry.filePath,
+          position: { line: indexEntry.startLine, character: indexEntry.startColumn },
+          scopeChain: indexEntry.scopeChain,
+        };
+
+        const cachedByAddress = await this._cache.readByAddress(indexEntry.address, indexSymbol);
+        if (cachedByAddress && !cachedByAddress.metadata.stale && cachedByAddress.metadata.llmProvider) {
+          const elapsed = Date.now() - startTime;
+          logger.logLLMStep(
+            `TIER 2 CACHE HIT — address "${indexEntry.address}" resolved in ${elapsed}ms.`
+          );
+          this._onAnalysisComplete.fire(cachedByAddress);
+          return { symbol: indexSymbol, result: cachedByAddress };
+        }
+        logger.logLLMStep(`TIER 2 CACHE MISS — no cache for "${indexEntry.address}".`);
+        missedAddresses.push(indexEntry.address);
+      } else {
+        logger.logLLMStep(`TIER 2 MISS — tree-sitter index has no entry at this cursor position.`);
+      }
+    }
+
+    // 3. TIER 3: Legacy fuzzy cache scan (name + ±3 lines) — kept as fallback
+    logger.logLLMStep(
+      `TIER 3: Legacy fuzzy cache scan — symbol="${cursor.word}" ` +
         `near line ${cursor.position.line} in ${cursor.filePath}...`
     );
     try {
@@ -357,38 +481,49 @@ export class AnalysisOrchestrator {
         const elapsed = Date.now() - startTime;
         const fallbackUsed = this._workspaceRoot ? ' (with LLM fallback available)' : '';
         logger.logLLMStep(
-          `CACHE HIT${fallbackUsed} — found cached ${cached.symbol.kind} "${cached.symbol.name}" ` +
+          `TIER 3 HIT${fallbackUsed} — found cached ${cached.symbol.kind} "${cached.symbol.name}" ` +
             `at line ${cached.symbol.position.line}. ` +
             `Provider: ${cached.result.metadata.llmProvider}, ` +
             `analyzed at: ${cached.result.metadata.analyzedAt}. ` +
             `Resolved in ${elapsed}ms — skipping LLM call.`
         );
         logger.info(
-          `Orchestrator: CACHE HIT for "${cursor.word}" — ` +
+          `Orchestrator: TIER 3 HIT for "${cursor.word}" — ` +
             `matched ${cached.symbol.kind} "${cached.symbol.name}" ` +
             `(provider: ${cached.result.metadata.llmProvider}). No LLM call needed.`
         );
+        // Promote the cache file so missed address-based lookups work next time
+        if (missedAddresses.length > 0) {
+          for (const missedAddr of missedAddresses) {
+            try {
+              await this._cache.promoteToAddress(missedAddr, cached.symbol);
+            } catch (promoteErr) {
+              logger.debug(`Orchestrator: promoteToAddress failed for "${missedAddr}": ${promoteErr}`);
+            }
+          }
+        }
+
         this._onAnalysisComplete.fire(cached.result);
         return cached;
       } else if (cached && cached.result.metadata.stale) {
         logger.logLLMStep(
-          `CACHE FOUND but STALE — found cached "${cached.symbol.name}" but metadata.stale=true. ` +
+          `TIER 3 FOUND but STALE — found cached "${cached.symbol.name}" but metadata.stale=true. ` +
             `Will re-analyze with LLM.`
         );
       } else if (cached && !cached.result.metadata.llmProvider) {
         logger.logLLMStep(
-          `CACHE FOUND but NO LLM DATA — found cached "${cached.symbol.name}" ` +
+          `TIER 3 FOUND but NO LLM DATA — found cached "${cached.symbol.name}" ` +
             `but no llmProvider (static-only). Will analyze with LLM.`
         );
       } else {
         logger.logLLMStep(
-          `CACHE MISS (cursor scan + LLM fallback) — no matching cache file found ` +
+          `TIER 3 MISS (cursor scan + LLM fallback) — no matching cache file found ` +
             `for symbol="${cursor.word}" near line ${cursor.position.line}. ` +
             `Will run full LLM analysis.`
         );
       }
     } catch (err) {
-      logger.logLLMStep(`CACHE ERROR during cursor scan: ${err}. Treating as cache miss.`);
+      logger.logLLMStep(`TIER 3 ERROR during cursor scan: ${err}. Treating as cache miss.`);
       logger.debug(`Orchestrator: cache findByCursorWithLLMFallback error: ${err}`);
     }
 
@@ -700,14 +835,19 @@ export class AnalysisOrchestrator {
   /**
    * Analyze all crucial symbols in a file in a single LLM call.
    *
-   * Sends the full file source to the LLM with instructions to identify
-   * and analyze every important symbol (classes, functions, methods,
-   * interfaces, enums, type aliases, exported variables). Each symbol's
-   * analysis is written as an individual cache file so that future
-   * "Explore Symbol" lookups can hit the cache.
+   * Uses VS Code's document symbol provider to discover all symbols in the
+   * file first, then sends a lightweight prompt to the LLM listing only the
+   * file path and discovered symbol names (no source code). Since the LLM
+   * runs in the workspace context, it can access the file directly.
+   *
+   * Falls back to the full-source-code prompt if the language server does
+   * not return any document symbols (e.g., unsupported language).
+   *
+   * Each symbol's analysis is written as an individual cache file so that
+   * future "Explore Symbol" lookups can hit the cache.
    *
    * @param filePath    Relative path from workspace root
-   * @param fileSource  Full source code of the file
+   * @param fileSource  Full source code of the file (used as fallback only)
    * @param onProgress  Optional callback for progress updates
    * @returns Number of symbols cached
    */
@@ -737,14 +877,35 @@ export class AnalysisOrchestrator {
       return 0;
     }
 
-    // 2. Build file analysis prompt
+    // 2. Discover symbols using VS Code's static analysis
+    onProgress?.('discovering-symbols', 'Discovering symbols via language server...');
+    logger.logLLMStep('Discovering symbols using VS Code document symbol provider...');
+    const discoveredSymbols = await this._staticAnalyzer.listFileSymbols(filePath);
+    logger.logLLMStep(`Discovered ${discoveredSymbols.length} symbols via language server`);
+
+    // 3. Build prompt — lightweight (symbol list only) if symbols were discovered,
+    //    or full-source fallback if the language server returned nothing
     onProgress?.('building-prompt', 'Building analysis prompt...');
-    logger.logLLMStep('Building file analysis prompt...');
-    const prompt = PromptBuilder.buildFileAnalysis(filePath, fileSource, this._cache.cacheRoot);
+    let prompt: string;
+    if (discoveredSymbols.length > 0) {
+      logger.logLLMStep(
+        `Building lightweight prompt with ${discoveredSymbols.length} discovered symbols (no source code)...`
+      );
+      prompt = PromptBuilder.buildFileAnalysisFromSymbolList(
+        filePath,
+        discoveredSymbols,
+        this._cache.cacheRoot
+      );
+    } else {
+      logger.logLLMStep(
+        'No symbols from language server — falling back to full-source prompt...'
+      );
+      prompt = PromptBuilder.buildFileAnalysis(filePath, fileSource, this._cache.cacheRoot);
+    }
     logger.logLLMStep(`File analysis prompt built (${prompt.length} chars)`);
     logger.logLLMInput(prompt);
 
-    // 3. Send to LLM
+    // 4. Send to LLM
     onProgress?.('llm-analyzing', `Analyzing all symbols with ${this._llmProvider.name}...`);
     let rawResponse = '';
     try {
@@ -766,7 +927,7 @@ export class AnalysisOrchestrator {
       return 0;
     }
 
-    // 4. Parse the response
+    // 5. Parse the response
     onProgress?.('parsing', 'Parsing symbol analyses...');
     logger.logLLMStep('Parsing file symbol analyses from response...');
     const symbolEntries = ResponseParser.parseFileSymbolAnalyses(rawResponse);
@@ -777,7 +938,7 @@ export class AnalysisOrchestrator {
       return 0;
     }
 
-    // 5. Write each symbol to cache
+    // 6. Write each symbol to cache
     onProgress?.('writing-cache', `Writing ${symbolEntries.length} symbol caches...`);
     logger.logLLMStep(`Writing ${symbolEntries.length} symbol cache entries...`);
 

@@ -8,6 +8,11 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import type { SymbolInfo, SymbolKindType } from '../models/types';
 import { logger } from '../utils/logger';
+import {
+  findDeepestSymbol,
+  buildScopeChainForPosition,
+  mapVscodeSymbolKind,
+} from '../utils/symbolHelpers';
 
 export class SymbolResolver {
   /**
@@ -38,7 +43,7 @@ export class SymbolResolver {
     logger.debug(`SymbolResolver: document has ${symbols.length} top-level symbols`);
 
     // Find the most specific symbol containing the position
-    const match = this._findDeepest(symbols, position);
+    const match = findDeepestSymbol(symbols, position);
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
     const relPath = path.relative(workspaceRoot, document.fileName);
@@ -69,7 +74,7 @@ export class SymbolResolver {
       return null;
     }
 
-    const matchedKind = this._mapSymbolKind(match.symbol.kind);
+    const matchedKind = mapVscodeSymbolKind(match.symbol.kind);
 
     // If the matched symbol is a function/method/class but the cursor is on a word
     // inside it (not on its name), the user may be clicking on a local variable.
@@ -118,33 +123,6 @@ export class SymbolResolver {
   }
 
   /**
-   * Walk the symbol tree to find the deepest symbol whose range contains the position.
-   * Returns the matched symbol and the full ancestor chain (root → parent).
-   */
-  private _findDeepest(
-    symbols: vscode.DocumentSymbol[],
-    position: vscode.Position,
-    ancestors: vscode.DocumentSymbol[] = []
-  ): { symbol: vscode.DocumentSymbol; ancestors: vscode.DocumentSymbol[] } | null {
-    for (const sym of symbols) {
-      if (sym.range.contains(position)) {
-        // Check children first for a tighter match
-        const childMatch = this._findDeepest(sym.children, position, [...ancestors, sym]);
-        if (childMatch) {
-          return childMatch;
-        }
-        // If the cursor is on the symbol's name, return it
-        if (sym.selectionRange.contains(position)) {
-          return { symbol: sym, ancestors };
-        }
-        // Otherwise still return it as the containing symbol
-        return { symbol: sym, ancestors };
-      }
-    }
-    return null;
-  }
-
-  /**
    * Try to resolve a local variable or identifier via the definition provider.
    * This catches local variables, parameters, and other tokens that don't
    * appear as DocumentSymbol children.
@@ -178,16 +156,37 @@ export class SymbolResolver {
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
       const defRelPath = path.relative(workspaceRoot, defUri.fsPath);
 
+      // When the definition is in a different file, fetch that file's document
+      // symbols so we build the scope chain from the correct symbol tree.
+      const isDifferentFile = defUri.fsPath !== document.uri.fsPath;
+      let defSymbols = allSymbols;
+      if (isDifferentFile) {
+        try {
+          const fetchedSymbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+            'vscode.executeDocumentSymbolProvider',
+            defUri
+          );
+          if (fetchedSymbols && fetchedSymbols.length > 0) {
+            defSymbols = fetchedSymbols;
+          }
+        } catch {
+          logger.debug(
+            `SymbolResolver._resolveViaDefinition: ` +
+              `could not fetch document symbols for ${defRelPath}, using current file symbols`
+          );
+        }
+      }
+
       // Build scope chain from enclosing symbols at the definition site
-      const scopeChain = this._buildScopeChainForPosition(allSymbols, defRange.start);
+      const scopeChain = buildScopeChainForPosition(defSymbols, defRange.start);
 
       // Determine kind: if it's defined inside a class, it's a property;
       // if inside a function, it's a variable.
       let kind: SymbolKindType = 'variable';
       if (scopeChain.length > 0) {
-        const parentScope = this._findDeepest(allSymbols, defRange.start);
+        const parentScope = findDeepestSymbol(defSymbols, defRange.start);
         if (parentScope) {
-          const parentKind = this._mapSymbolKind(parentScope.symbol.kind);
+          const parentKind = mapVscodeSymbolKind(parentScope.symbol.kind);
           if (parentKind === 'class' || parentKind === 'interface') {
             kind = 'property';
           }
@@ -218,57 +217,6 @@ export class SymbolResolver {
     } catch (err) {
       logger.debug(`SymbolResolver._resolveViaDefinition: failed for "${word}": ${err}`);
       return null;
-    }
-  }
-
-  /**
-   * Build a scope chain (ancestor names) for a given position in the symbol tree.
-   */
-  private _buildScopeChainForPosition(
-    symbols: vscode.DocumentSymbol[],
-    position: vscode.Position,
-    chain: string[] = []
-  ): string[] {
-    for (const sym of symbols) {
-      if (sym.range.contains(position)) {
-        const childChain = this._buildScopeChainForPosition(sym.children, position, [
-          ...chain,
-          sym.name,
-        ]);
-        // Return the deepest chain found
-        return childChain.length > chain.length ? childChain : [...chain, sym.name];
-      }
-    }
-    return chain;
-  }
-
-  /**
-   * Map VS Code SymbolKind to our SymbolKindType.
-   */
-  private _mapSymbolKind(kind: vscode.SymbolKind): SymbolKindType {
-    switch (kind) {
-      case vscode.SymbolKind.Class:
-      case vscode.SymbolKind.Struct:
-        return 'class';
-      case vscode.SymbolKind.Function:
-      case vscode.SymbolKind.Constructor:
-        return 'function';
-      case vscode.SymbolKind.Method:
-        return 'method';
-      case vscode.SymbolKind.Variable:
-      case vscode.SymbolKind.Constant:
-        return 'variable';
-      case vscode.SymbolKind.Interface:
-        return 'interface';
-      case vscode.SymbolKind.TypeParameter:
-        return 'type';
-      case vscode.SymbolKind.Enum:
-        return 'enum';
-      case vscode.SymbolKind.Property:
-      case vscode.SymbolKind.Field:
-        return 'property';
-      default:
-        return 'unknown';
     }
   }
 }

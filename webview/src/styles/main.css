@@ -557,6 +557,19 @@ a.rel-file:hover {
   border-top: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
 }
 
+.metadata__cache-path {
+  cursor: pointer;
+  opacity: 0.8;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  word-break: break-all;
+}
+
+.metadata__cache-path:hover {
+  opacity: 1;
+  color: var(--vscode-textLink-foreground);
+}
+
 /* =====================
    Step-by-Step List
    ===================== */

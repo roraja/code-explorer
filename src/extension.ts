@@ -18,6 +18,7 @@ import { pullAdoContent, pushAdoContent } from './git/AdoSync';
 import { CodeExplorerHoverProvider } from './providers/CodeExplorerHoverProvider';
 import { CodeExplorerCodeLensProvider } from './providers/CodeExplorerCodeLensProvider';
 import { GraphBuilder } from './graph/GraphBuilder';
+import { showSymbolInfo } from './providers/ShowSymbolInfoCommand';
 import type { CursorContext } from './models/types';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -41,7 +42,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const llmProviderName = config.get<string>('llmProvider', 'copilot-cli');
 
   // --- LLM Layer ---
-  const llmProvider = LLMProviderFactory.create(llmProviderName);
+  const llmProvider = LLMProviderFactory.create(llmProviderName, {
+    baseUrl: config.get<string>('buildServiceUrl', 'http://localhost:8090'),
+    model: config.get<string>('buildServiceModel', 'claude-opus-4.5'),
+    agentBackend: config.get<string>('buildServiceAgentBackend', ''),
+  });
 
   // Set workspace root so the CLI provider runs with full workspace context
   if (llmProvider.setWorkspaceRoot) {
@@ -500,6 +505,15 @@ export function activate(context: vscode.ExtensionContext): void {
             }
           }
         );
+      } finally {
+        logger.endCommandLog();
+      }
+    }),
+
+    vscode.commands.registerCommand(COMMANDS.SHOW_SYMBOL_INFO, async () => {
+      logger.startCommandLog('show-symbol-info');
+      try {
+        await showSymbolInfo();
       } finally {
         logger.endCommandLog();
       }

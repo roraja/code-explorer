@@ -68,19 +68,34 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
     });
 
     const pid = child.pid;
-    logger.info(`${label}: spawned process PID=${pid}`);
+    logger.info(`${label}: spawned process PID=${pid}, command: ${command} ${args.join(' ')}`);
 
     let stdout = '';
     let stderr = '';
     let settled = false;
     const startTime = Date.now();
 
-    // Periodic "still waiting" log every 15 seconds
+    // Track last output for the "still waiting" periodic log
+    let _lastStdoutSnippet = '';
+    let _lastStderrSnippet = '';
+    let _stdoutLineCount = 0;
+    let _stderrLineCount = 0;
+
+    // Periodic "still waiting" log every 15 seconds — includes recent output snippet
     const waitingInterval = setInterval(() => {
       if (!settled) {
         const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+        const recentOut = _lastStdoutSnippet
+          ? ` | last stdout: "${_lastStdoutSnippet.substring(0, 120).replace(/\n/g, '\\n')}"`
+          : ' | no stdout yet';
+        const recentErr = _lastStderrSnippet
+          ? ` | last stderr: "${_lastStderrSnippet.substring(0, 120).replace(/\n/g, '\\n')}"`
+          : '';
         logger.info(
-          `${label}: Still waiting for agent to complete (PID=${pid}, ${elapsedSec}s elapsed)`
+          `${label}: Still waiting (PID=${pid}, ${elapsedSec}s elapsed, ` +
+            `stdout=${_stdoutLineCount} lines/${stdout.length} bytes, ` +
+            `stderr=${_stderrLineCount} lines/${stderr.length} bytes)` +
+            `${recentOut}${recentErr}`
         );
       }
     }, 15_000);
@@ -91,6 +106,22 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
         settled = true;
         clearInterval(waitingInterval);
         child.kill('SIGTERM');
+        const elapsedMs = Date.now() - startTime;
+        logger.error(
+          `${label}: TIMED OUT after ${elapsedMs}ms (PID=${pid}, ` +
+            `stdout=${stdout.length} bytes/${_stdoutLineCount} lines, ` +
+            `stderr=${stderr.length} bytes/${_stderrLineCount} lines)`
+        );
+        if (_lastStdoutSnippet) {
+          logger.error(
+            `${label}: last stdout before timeout: "${_lastStdoutSnippet.substring(0, 200).replace(/\n/g, '\\n')}"`
+          );
+        }
+        if (_lastStderrSnippet) {
+          logger.error(
+            `${label}: last stderr before timeout: "${_lastStderrSnippet.substring(0, 200).replace(/\n/g, '\\n')}"`
+          );
+        }
         const err = new Error('Process timed out');
         (err as Error & { killed: boolean; signal: string }).killed = true;
         (err as Error & { signal: string }).signal = 'SIGTERM';
@@ -101,6 +132,21 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
     child.stdout.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       stdout += text;
+
+      // Track for periodic "still waiting" summary
+      _lastStdoutSnippet = text.trimEnd();
+      _stdoutLineCount += (text.match(/\n/g) || []).length;
+
+      // Log every stdout chunk to the main logger so it's visible in
+      // the Output Channel and daily log file in real time.
+      // Use debug level to avoid flooding, but always present in file logs.
+      const lines = text.trimEnd().split('\n');
+      for (const line of lines) {
+        if (line.trim()) {
+          logger.debug(`${label} [stdout]: ${line}`);
+        }
+      }
+
       if (onStdoutChunk) {
         onStdoutChunk(text);
       }
@@ -109,6 +155,21 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       stderr += text;
+
+      // Track for periodic "still waiting" summary
+      _lastStderrSnippet = text.trimEnd();
+      _stderrLineCount += (text.match(/\n/g) || []).length;
+
+      // Log every stderr chunk at warn level so it's immediately visible
+      // in the Output Channel — stderr often contains progress info,
+      // error messages, or diagnostic output that helps debug stuck processes.
+      const lines = text.trimEnd().split('\n');
+      for (const line of lines) {
+        if (line.trim()) {
+          logger.warn(`${label} [stderr]: ${line}`);
+        }
+      }
+
       if (onStderrChunk) {
         onStderrChunk(text);
       }
@@ -119,6 +180,10 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
         settled = true;
         clearTimeout(timer);
         clearInterval(waitingInterval);
+        const elapsedMs = Date.now() - startTime;
+        logger.error(
+          `${label}: spawn error after ${elapsedMs}ms (PID=${pid}): ${err.message}`
+        );
         reject(err);
       }
     });
@@ -131,7 +196,13 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
       clearTimeout(timer);
       clearInterval(waitingInterval);
 
+      const elapsedMs = Date.now() - startTime;
+
       if (signal) {
+        logger.error(
+          `${label}: process killed by signal ${signal} after ${elapsedMs}ms ` +
+            `(PID=${pid}, stdout=${stdout.length} bytes, stderr=${stderr.length} bytes)`
+        );
         const err = new Error(`Process killed by signal ${signal}`);
         (err as Error & { signal: string }).signal = signal;
         reject(err);
@@ -139,17 +210,26 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
       }
 
       if (stderr.trim()) {
-        logger.debug(`${label} stderr: ${stderr.trim().substring(0, 500)}`);
+        logger.debug(`${label} stderr (final): ${stderr.trim().substring(0, 500)}`);
       }
 
       if (code !== 0 && code !== null) {
         const errorDetail = stderr.trim() || stdout.trim();
+        logger.error(
+          `${label}: exited with code ${code} after ${elapsedMs}ms ` +
+            `(PID=${pid}, stdout=${stdout.length} bytes, stderr=${stderr.length} bytes)`
+        );
         if (stdout.trim()) {
           logger.debug(`${label} stdout on failure: ${stdout.trim().substring(0, 500)}`);
         }
         reject(new Error(`${command} exited with code ${code}: ${errorDetail.substring(0, 500)}`));
         return;
       }
+
+      logger.info(
+        `${label}: completed successfully in ${elapsedMs}ms ` +
+          `(PID=${pid}, stdout=${stdout.length} bytes, stderr=${stderr.length} bytes)`
+      );
 
       resolve(stdout);
     });

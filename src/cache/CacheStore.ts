@@ -26,6 +26,7 @@ import { SYMBOL_KIND_PREFIX } from '../models/types';
 import { CACHE, ANALYSIS_VERSION, CACHE_FALLBACK_LLM_TIMEOUT_MS } from '../models/constants';
 import { logger } from '../utils/logger';
 import { runCLI } from '../utils/cli';
+import { addressToCacheComponents } from '../indexing/SymbolAddress';
 
 /**
  * Summary of a cached symbol — lightweight metadata used for
@@ -58,6 +59,18 @@ export class CacheStore {
     return this._cacheRoot;
   }
 
+  /**
+   * Compute the workspace-relative cache file path for a symbol.
+   * Does NOT check whether the file exists — purely deterministic from the symbol's
+   * kind, name, scope chain, and filePath.
+   *
+   * Example: ".vscode/code-explorer/src/main.ts/fn.analyzeSymbol.md"
+   */
+  getRelativeCachePath(symbol: SymbolInfo): string {
+    const cacheKey = this._buildCacheKey(symbol);
+    return path.join('.vscode', CACHE.DIR_NAME, symbol.filePath, `${cacheKey}.md`);
+  }
+
   // ── Clear ───────────────────────────────────────────────
 
   /**
@@ -83,6 +96,7 @@ export class CacheStore {
       const content = await fs.readFile(filePath, 'utf-8');
       const result = this._deserialize(content, symbol);
       if (result) {
+        result.metadata.cacheFilePath = this.getRelativeCachePath(symbol);
         const age = Date.now() - new Date(result.metadata.analyzedAt).getTime();
         const ageHours = Math.round(age / 3600000);
         logger.info(
@@ -95,6 +109,59 @@ export class CacheStore {
       logger.debug(`CacheStore.read: MISS for ${symbol.kind} "${symbol.name}"`);
       return null;
     }
+  }
+
+  /**
+   * Try to read a cached analysis by symbol address.
+   * Uses the address-derived cache path for O(1) direct file lookup —
+   * no directory scanning, no line-number matching, no LLM fallback.
+   *
+   * @param address  Full symbol address (e.g., 'src/main.cpp#fn.printBanner')
+   * @param symbol   SymbolInfo to attach to the result (for display)
+   * @returns The AnalysisResult if found and parseable, or null on miss.
+   */
+  async readByAddress(
+    address: string,
+    symbol: SymbolInfo
+  ): Promise<AnalysisResult | null> {
+    // Derive cache path from the address using the shared utility.
+    // addressToCacheComponents splits "file#scope::kind.name" into
+    // { filePath, fileName } so the path derivation logic is defined
+    // in exactly one place (SymbolAddress.ts).
+    let cachePath: string;
+    try {
+      const { filePath, fileName } = addressToCacheComponents(address);
+      cachePath = path.join(this._cacheRoot, filePath, fileName);
+    } catch {
+      logger.debug(`CacheStore.readByAddress: invalid address: "${address}"`);
+      return null;
+    }
+
+    logger.debug(`CacheStore.readByAddress: looking for ${cachePath}`);
+
+    try {
+      const content = await fs.readFile(cachePath, 'utf-8');
+      const result = this._deserialize(content, symbol);
+      if (result) {
+        // Compute the relative cache path from the address components
+        const { filePath: addrFilePath, fileName: addrFileName } = addressToCacheComponents(address);
+        result.metadata.cacheFilePath = path.join('.vscode', CACHE.DIR_NAME, addrFilePath, addrFileName);
+        const age = Date.now() - new Date(result.metadata.analyzedAt).getTime();
+        const ageHours = Math.round(age / 3600000);
+        logger.info(
+          `CacheStore.readByAddress: HIT for "${symbol.name}" via address ` +
+            `(${ageHours}h old, provider: ${result.metadata.llmProvider || 'static'})`
+        );
+        return result;
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.debug(`CacheStore.readByAddress: read error: ${err}`);
+      }
+    }
+
+    logger.debug(`CacheStore.readByAddress: MISS for address "${address}"`);
+    return null;
   }
 
   /**
@@ -150,6 +217,7 @@ export class CacheStore {
 
         const result = this._deserialize(content, symbolInfo);
         if (result) {
+          result.metadata.cacheFilePath = path.join('.vscode', CACHE.DIR_NAME, filePath, mdFile);
           results.push(result);
         }
       } catch (err) {
@@ -283,6 +351,8 @@ export class CacheStore {
         logger.debug(`CacheStore.findByCursor: ${mdFile} — deserialization failed — skipping`);
         continue;
       }
+
+      result.metadata.cacheFilePath = path.join('.vscode', CACHE.DIR_NAME, filePath, mdFile);
 
       const age = Date.now() - new Date(result.metadata.analyzedAt).getTime();
       const ageHours = Math.round(age / 3600000);
@@ -568,6 +638,10 @@ If no match, output:
         return null;
       }
 
+      result.metadata.cacheFilePath = path.join(
+        '.vscode', CACHE.DIR_NAME, cursor.filePath, matched.fileName
+      );
+
       const age = Date.now() - new Date(result.metadata.analyzedAt).getTime();
       const ageHours = Math.round(age / 3600000);
 
@@ -599,12 +673,116 @@ If no match, output:
 
     await fs.mkdir(path.dirname(filePath), { recursive: true });
 
+    // Stamp the cache file path into metadata so consumers (e.g. the webview)
+    // can display where the analysis is stored on disk.
+    result.metadata.cacheFilePath = this.getRelativeCachePath(result.symbol);
+
     const content = this._serialize(result);
     await fs.writeFile(filePath, content, 'utf-8');
 
     const relativePath = path.relative(this._cacheRoot, filePath);
     logger.info(`CacheStore.write: wrote ${content.length} bytes → ${relativePath}`);
     return filePath;
+  }
+
+  // ── Address Promotion ──────────────────────────────────
+
+  /**
+   * Promote a cache file so that `readByAddress()` can find it in the future.
+   *
+   * When `findByCursor` (Tier 3) finds a cached analysis that
+   * `readByAddress` (Tier 1) could not, the two paths differ — typically
+   * because the scope chain or kind resolved by VS Code / tree-sitter
+   * doesn't match what the LLM originally produced when writing the file.
+   *
+   * This method creates a **symlink** from the address-derived cache path
+   * to the actual cache file (the one written by `write()` via
+   * `_resolvePath`). Future `readByAddress` calls hit the symlink and
+   * skip the expensive directory scan / LLM fallback entirely.
+   *
+   * No-op when:
+   * - The address-derived path already exists (symlink or real file).
+   * - The legacy cache file doesn't exist.
+   * - The two paths are identical.
+   *
+   * @param address  Full symbol address
+   *                 (e.g. `'src/main.cpp#app::fn.printBanner'`)
+   * @param symbol   SymbolInfo used to compute the legacy
+   *                 `_resolvePath` target
+   */
+  async promoteToAddress(address: string, symbol: SymbolInfo): Promise<void> {
+    // 1. Derive the address-based path using the shared utility
+    let addressPath: string;
+    try {
+      const { filePath, fileName } = addressToCacheComponents(address);
+      addressPath = path.join(this._cacheRoot, filePath, fileName);
+    } catch {
+      return;
+    }
+
+    // 2. Derive the legacy path (the one that write() uses)
+    const legacyPath = this._resolvePath(symbol);
+
+    // 3. If they're the same, nothing to do
+    if (addressPath === legacyPath) {
+      logger.debug(
+        `CacheStore.promoteToAddress: paths are identical — no link needed ` +
+          `("${path.basename(addressPath)}")`
+      );
+      return;
+    }
+
+    // 4. Make sure the legacy file actually exists
+    try {
+      await fs.access(legacyPath);
+    } catch {
+      logger.debug(
+        `CacheStore.promoteToAddress: legacy file does not exist — cannot promote ` +
+          `("${path.basename(legacyPath)}")`
+      );
+      return;
+    }
+
+    // 5. If the address path already exists, skip
+    try {
+      await fs.access(addressPath);
+      logger.debug(
+        `CacheStore.promoteToAddress: address path already exists — no link needed ` +
+          `("${path.basename(addressPath)}")`
+      );
+      return;
+    } catch {
+      // Good — file doesn't exist yet, we'll create the link
+    }
+
+    // 6. Create directory for the address path and symlink
+    try {
+      await fs.mkdir(path.dirname(addressPath), { recursive: true });
+
+      // Use a relative symlink so the workspace remains portable
+      const relTarget = path.relative(path.dirname(addressPath), legacyPath);
+      await fs.symlink(relTarget, addressPath);
+
+      logger.info(
+        `CacheStore.promoteToAddress: linked "${path.basename(addressPath)}" → ` +
+          `"${path.basename(legacyPath)}" (address promotion for O(1) lookup)`
+      );
+    } catch (err) {
+      // Symlink might fail on some platforms (e.g. Windows without dev mode).
+      // Fall back to copying the file.
+      try {
+        await fs.copyFile(legacyPath, addressPath);
+        logger.info(
+          `CacheStore.promoteToAddress: copied "${path.basename(legacyPath)}" → ` +
+            `"${path.basename(addressPath)}" (symlink failed, used copy fallback)`
+        );
+      } catch (copyErr) {
+        logger.warn(
+          `CacheStore.promoteToAddress: failed to promote cache file: ` +
+            `symlink error: ${err}, copy error: ${copyErr}`
+        );
+      }
+    }
   }
 
   // ── Path Resolution ─────────────────────────────────────

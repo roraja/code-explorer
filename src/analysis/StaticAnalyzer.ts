@@ -6,10 +6,218 @@
  */
 import * as vscode from 'vscode';
 import * as path from 'path';
-import type { SymbolInfo, UsageEntry, CallStackEntry, RelationshipEntry } from '../models/types';
+import type { SymbolInfo, SymbolKindType, UsageEntry, CallStackEntry, RelationshipEntry } from '../models/types';
 import { logger } from '../utils/logger';
+import {
+  findDeepestSymbol,
+  buildScopeChainForPosition,
+  mapVscodeSymbolKind,
+} from '../utils/symbolHelpers';
 
 export class StaticAnalyzer {
+  /**
+   * Resolve the symbol at a cursor position using VS Code's built-in
+   * language intelligence (definition provider + document symbol provider).
+   *
+   * This is a fast, deterministic alternative to LLM-based symbol resolution.
+   * It uses the same APIs that power Go-to-Definition and breadcrumbs.
+   *
+   * Returns a SymbolInfo with accurate kind, scope chain, and range — or
+   * null if the language server doesn't provide enough information.
+   *
+   * @param filePath  Relative path from workspace root
+   * @param line      0-based line number
+   * @param character 0-based character position
+   * @param word      The word at the cursor (for fallback)
+   */
+  async resolveSymbolAtPosition(
+    filePath: string,
+    line: number,
+    character: number,
+    word: string
+  ): Promise<SymbolInfo | null> {
+    logger.debug(
+      `StaticAnalyzer.resolveSymbolAtPosition: "${word}" at ${filePath}:${line}:${character}`
+    );
+    try {
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceRoot) {
+        return null;
+      }
+
+      const uri = vscode.Uri.file(path.join(workspaceRoot, filePath));
+      const position = new vscode.Position(line, character);
+
+      // Step 1: Get document symbols (gives us the full symbol tree with kinds)
+      const docSymbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+        'vscode.executeDocumentSymbolProvider',
+        uri
+      );
+
+      if (!docSymbols || docSymbols.length === 0) {
+        logger.debug('StaticAnalyzer.resolveSymbolAtPosition: no document symbols');
+        return null;
+      }
+
+      // Step 2: Find the deepest symbol containing the cursor position
+      const match = findDeepestSymbol(docSymbols, position);
+
+      if (!match) {
+        // Step 3: Fallback — try definition provider for tokens not in document symbols
+        // (e.g., local variables, references to external symbols)
+        return this._resolveViaDefinitionProvider(uri, position, word, filePath, docSymbols);
+      }
+
+      // Step 4: Check if cursor is on the symbol's name or inside its body
+      // If inside the body (not on the name), try definition provider for the specific token
+      if (!match.symbol.selectionRange.contains(position)) {
+        const tokenResult = await this._resolveViaDefinitionProvider(
+          uri, position, word, filePath, docSymbols
+        );
+        if (tokenResult) {
+          return tokenResult;
+        }
+      }
+
+      // Step 5: Build SymbolInfo from the matched document symbol
+      const kind = mapVscodeSymbolKind(match.symbol.kind);
+      const scopeChain = match.ancestors.map((a) => a.name);
+
+      const info: SymbolInfo = {
+        name: match.symbol.name,
+        kind,
+        filePath,
+        position: {
+          line: match.symbol.selectionRange.start.line,
+          character: match.symbol.selectionRange.start.character,
+        },
+        range: {
+          start: {
+            line: match.symbol.range.start.line,
+            character: match.symbol.range.start.character,
+          },
+          end: {
+            line: match.symbol.range.end.line,
+            character: match.symbol.range.end.character,
+          },
+        },
+        containerName:
+          match.ancestors.length > 0
+            ? match.ancestors[match.ancestors.length - 1].name
+            : undefined,
+        scopeChain,
+      };
+
+      logger.info(
+        `StaticAnalyzer.resolveSymbolAtPosition: resolved ${info.kind} "${info.name}" ` +
+          `at ${info.filePath}:${info.position.line}` +
+          (scopeChain.length > 0 ? ` scope=[${scopeChain.join('.')}]` : '')
+      );
+
+      return info;
+    } catch (err) {
+      logger.debug(`StaticAnalyzer.resolveSymbolAtPosition: failed: ${err}`);
+      return null;
+    }
+  }
+
+  /**
+   * Try to resolve a token via the definition provider.
+   * Catches local variables, parameters, and identifiers that
+   * don't appear as DocumentSymbol children.
+   */
+  private async _resolveViaDefinitionProvider(
+    uri: vscode.Uri,
+    position: vscode.Position,
+    word: string,
+    _relPath: string,
+    allSymbols: vscode.DocumentSymbol[]
+  ): Promise<SymbolInfo | null> {
+    try {
+      const definitions = await vscode.commands.executeCommand<
+        (vscode.Location | vscode.LocationLink)[]
+      >('vscode.executeDefinitionProvider', uri, position);
+
+      if (!definitions || definitions.length === 0) {
+        return null;
+      }
+
+      const def = definitions[0];
+      const defUri = 'targetUri' in def ? def.targetUri : def.uri;
+      const defRange = 'targetRange' in def ? def.targetRange : def.range;
+
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+      const defRelPath = path.relative(workspaceRoot, defUri.fsPath);
+
+      // When the definition is in a different file, fetch that file's document
+      // symbols so we build the scope chain from the correct symbol tree.
+      // Using the current file's symbols for a cross-file definition produces
+      // wrong scope chains (the definition-site position doesn't exist in the
+      // current file's symbol tree).
+      const isDifferentFile = defUri.fsPath !== uri.fsPath;
+      let defSymbols = allSymbols;
+      if (isDifferentFile) {
+        try {
+          const fetchedSymbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+            'vscode.executeDocumentSymbolProvider',
+            defUri
+          );
+          if (fetchedSymbols && fetchedSymbols.length > 0) {
+            defSymbols = fetchedSymbols;
+          }
+        } catch {
+          // Fall back to current file's symbols — better than nothing
+          logger.debug(
+            `StaticAnalyzer._resolveViaDefinitionProvider: ` +
+              `could not fetch document symbols for ${defRelPath}, using current file symbols`
+          );
+        }
+      }
+
+      // Build scope chain from enclosing symbols at the definition site
+      const scopeChain = buildScopeChainForPosition(defSymbols, defRange.start);
+
+      // Infer kind: if inside a class, it's a property; if inside a function, it's a variable
+      let kind: SymbolKindType = 'variable';
+      if (scopeChain.length > 0) {
+        const parentMatch = findDeepestSymbol(defSymbols, defRange.start);
+        if (parentMatch) {
+          const parentKind = mapVscodeSymbolKind(parentMatch.symbol.kind);
+          if (parentKind === 'class' || parentKind === 'interface') {
+            kind = 'property';
+          }
+        }
+      }
+
+      const info: SymbolInfo = {
+        name: word,
+        kind,
+        filePath: defRelPath,
+        position: {
+          line: defRange.start.line,
+          character: defRange.start.character,
+        },
+        range: {
+          start: { line: defRange.start.line, character: defRange.start.character },
+          end: { line: defRange.end.line, character: defRange.end.character },
+        },
+        containerName: scopeChain.length > 0 ? scopeChain[scopeChain.length - 1] : undefined,
+        scopeChain,
+      };
+
+      logger.info(
+        `StaticAnalyzer.resolveSymbolAtPosition: resolved via definition provider: ` +
+          `${info.kind} "${info.name}" at ${info.filePath}:${info.position.line}` +
+          (scopeChain.length > 0 ? ` scope=[${scopeChain.join('.')}]` : '')
+      );
+
+      return info;
+    } catch (err) {
+      logger.debug(`StaticAnalyzer._resolveViaDefinitionProvider: failed: ${err}`);
+      return null;
+    }
+  }
+
   /**
    * Find all references to a symbol across the workspace.
    */
@@ -316,6 +524,85 @@ export class StaticAnalyzer {
   }
 
   /**
+   * List all important symbols in a file using VS Code's document symbol provider.
+   *
+   * Walks the full symbol tree returned by the language server and flattens it
+   * into a list of symbol descriptors with kind, name, line number, and scope chain.
+   * Filters to "crucial" symbol kinds: classes, functions, methods, interfaces,
+   * enums, structs, type aliases, and exported variables/constants.
+   *
+   * @param filePath  Relative path from workspace root
+   * @returns Array of discovered symbol descriptors, or empty array if the
+   *          language server doesn't provide document symbols.
+   */
+  async listFileSymbols(
+    filePath: string
+  ): Promise<FileSymbolDescriptor[]> {
+    logger.debug(`StaticAnalyzer.listFileSymbols: ${filePath}`);
+    try {
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceRoot) {
+        return [];
+      }
+
+      const uri = vscode.Uri.file(path.join(workspaceRoot, filePath));
+      const docSymbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+        'vscode.executeDocumentSymbolProvider',
+        uri
+      );
+
+      if (!docSymbols || docSymbols.length === 0) {
+        logger.debug('StaticAnalyzer.listFileSymbols: no document symbols returned');
+        return [];
+      }
+
+      const results: FileSymbolDescriptor[] = [];
+      this._flattenSymbols(docSymbols, filePath, [], results);
+
+      logger.info(
+        `StaticAnalyzer.listFileSymbols: found ${results.length} symbols in ${filePath}`
+      );
+      return results;
+    } catch (err) {
+      logger.warn(`StaticAnalyzer.listFileSymbols: failed for ${filePath}: ${err}`);
+      return [];
+    }
+  }
+
+  /**
+   * Recursively flatten a document symbol tree into a list of FileSymbolDescriptors.
+   * Only includes "crucial" symbol kinds (classes, functions, methods, interfaces,
+   * enums, variables/constants, properties, structs).
+   */
+  private _flattenSymbols(
+    symbols: vscode.DocumentSymbol[],
+    filePath: string,
+    scopeChain: string[],
+    results: FileSymbolDescriptor[]
+  ): void {
+    for (const sym of symbols) {
+      const kind = mapVscodeSymbolKind(sym.kind);
+
+      // Include crucial symbols — skip unknown/unrecognized kinds
+      if (kind !== 'unknown') {
+        results.push({
+          name: sym.name,
+          kind,
+          filePath,
+          line: sym.selectionRange.start.line,
+          scopeChain: [...scopeChain],
+          container: scopeChain.length > 0 ? scopeChain[scopeChain.length - 1] : undefined,
+        });
+      }
+
+      // Recurse into children with updated scope chain
+      if (sym.children && sym.children.length > 0) {
+        this._flattenSymbols(sym.children, filePath, [...scopeChain, sym.name], results);
+      }
+    }
+  }
+
+  /**
    * Find a document symbol by name within a tree (breadth-first).
    */
   private _findContainerByName(
@@ -333,4 +620,23 @@ export class StaticAnalyzer {
     }
     return null;
   }
+}
+
+/**
+ * Descriptor for a symbol discovered via VS Code's document symbol provider.
+ * Lightweight — contains only identity info, no source code.
+ */
+export interface FileSymbolDescriptor {
+  /** Symbol name */
+  name: string;
+  /** Symbol kind (function, class, method, etc.) */
+  kind: SymbolKindType;
+  /** Relative file path from workspace root */
+  filePath: string;
+  /** 0-based line number of the symbol definition */
+  line: number;
+  /** Scope chain from outermost to innermost enclosing scope */
+  scopeChain: string[];
+  /** Immediate container name (last element of scope chain), if any */
+  container?: string;
 }

@@ -51,7 +51,7 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Symbol identity parsing (`json:symbol_identity`) | Implemented | `ResponseParser.ts` (`parseSymbolIdentity`) |
 | Related symbol pre-caching with cache paths | Implemented | `ResponseParser.ts`, `AnalysisOrchestrator.ts` |
 | Data kind analysis (`json:data_kind`) | Implemented | `ResponseParser.ts`, `CacheStore.ts` |
-| Full-file analysis (`buildFileAnalysis`) | Implemented | `PromptBuilder.ts`, `AnalysisOrchestrator.ts` (`analyzeFile`) |
+| Full-file analysis (`buildFileAnalysisFromSymbolList`) | Implemented | `PromptBuilder.ts`, `StaticAnalyzer.ts` (`listFileSymbols`), `AnalysisOrchestrator.ts` (`analyzeFile`) |
 | File symbol batch parsing (`json:file_symbol_analyses`) | Implemented | `ResponseParser.ts` (`parseFileSymbolAnalyses`) |
 | Mermaid diagram generation (`json:diagrams`) | Implemented | `PromptBuilder.ts`, `ResponseParser.ts`, `CacheStore.ts`, `webview/main.ts` |
 | Mermaid diagram rendering (SVG in webview) | Implemented | `webview/main.ts` (mermaid library), `webview/styles/main.css` |

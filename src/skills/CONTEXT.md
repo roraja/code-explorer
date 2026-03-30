@@ -22,13 +22,13 @@ The `SkillInstaller` writes skill definition files to:
 - **GitHub Copilot**: `~/.github/instructions/code-explorer-analyze.instructions.md`
   - Uses Copilot's instruction format with `applyTo` and `description`
 
-Both files share the same core content: a comprehensive instruction set that
-teaches the agent how to:
+Both files share the same core content (`_buildSharedSkillContent()`): a comprehensive
+instruction set that teaches the agent how to:
 1. Read a source file
 2. Identify symbols (classes, functions, methods, variables, etc.)
-3. Generate analysis for each symbol (overview, callers, data flow, etc.)
+3. Generate analysis for each symbol (overview, callers, data flow, diagrams, etc.)
 4. Write markdown cache files with YAML frontmatter to `.vscode/code-explorer/`
-5. Follow the exact cache key naming convention (`<kind_prefix>.<name>.md`)
+5. Follow the exact cache key naming convention (`<scope>.<kind_prefix>.<name>.md`)
 
 The skill accepts:
 - `filePath` (required) — relative path to the source file
@@ -38,8 +38,19 @@ The skill accepts:
 
 The skill output matches `CacheStore._serialize()` format exactly:
 - YAML frontmatter with `symbol`, `kind`, `file`, `line`, `scope_chain`, `analyzed_at`, etc.
-- Tagged JSON fences (`json:callers`, `json:steps`, `json:subfunctions`, etc.)
-- Section ordering matches `CacheStore._deserialize()` expectations
+- Tagged JSON fences (`json:callers`, `json:steps`, `json:subfunctions`, `json:data_flow`, etc.)
+- Section ordering matches `CacheStore._serialize()` output order exactly:
+  Overview → Key Points → Callers → Usage → Relationships → Data Flow → Variable Lifecycle →
+  Data Kind → Class Members → Member Access → Diagrams → Steps → Sub-Functions →
+  Function Input → Function Output → Dependencies → Usage Pattern → Potential Issues →
+  Related Symbol Analyses → Q&A
+
+The skill includes:
+- A "Section Ordering — Why It Matters" section explaining the exact order
+- A "JSON Block Tags — Quick Reference" table listing all 13 tagged fence labels
+- A "Section Inclusion Rules" table showing which sections apply to each symbol kind
+- A "YAML Frontmatter Details" table documenting all frontmatter fields
+- A "Troubleshooting" table for common cache-compatibility problems
 
 ## VS Code Integration
 

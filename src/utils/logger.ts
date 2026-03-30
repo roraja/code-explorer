@@ -37,12 +37,42 @@ let _extensionVersion: string | undefined;
 let _llmCallCounter = 0;
 let _llmLogDir: string | undefined;
 let _activeLLMLogFile: string | undefined;
+let _activeLLMLogStream: fs.WriteStream | undefined;
 let _commandCallCounter = 0;
 let _commandLogDir: string | undefined;
 let _activeCommandLogStream: fs.WriteStream | undefined;
 let _activeCommandLogFile: string | undefined;
 
 // ── helpers ──────────────────────────────────────────────
+
+/**
+ * Scan a directory for files matching `NN-*.ext` and return the highest
+ * sequence number found, or 0 if none exist.
+ */
+function findHighestSequenceNumber(dir: string, ext: string): number {
+  try {
+    if (!fs.existsSync(dir)) {
+      return 0;
+    }
+    const files = fs.readdirSync(dir);
+    let max = 0;
+    for (const file of files) {
+      if (!file.endsWith(ext)) {
+        continue;
+      }
+      const match = file.match(/^(\d+)-/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > max) {
+          max = num;
+        }
+      }
+    }
+    return max;
+  } catch {
+    return 0;
+  }
+}
 
 function getChannel(): vscode.OutputChannel {
   if (!_channel) {
@@ -156,8 +186,10 @@ export const logger = {
     _logDir = path.join(workspaceRoot, '.vscode', 'code-explorer-logs');
     _llmLogDir = path.join(_logDir, 'llms');
     _commandLogDir = path.join(_logDir, 'commands');
-    _llmCallCounter = 0;
-    _commandCallCounter = 0;
+    // Scan existing files to find the highest sequence number so new files
+    // continue from where they left off instead of resetting to 01.
+    _llmCallCounter = findHighestSequenceNumber(_llmLogDir, '.md');
+    _commandCallCounter = findHighestSequenceNumber(_commandLogDir, '.log');
     _sessionId = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
     _extensionVersion = version;
 
@@ -180,6 +212,9 @@ export const logger = {
 
   /** Dispose the output channel and close the file stream. */
   dispose(): void {
+    _activeLLMLogStream?.end();
+    _activeLLMLogStream = undefined;
+    _activeLLMLogFile = undefined;
     _activeCommandLogStream?.end();
     _activeCommandLogStream = undefined;
     _activeCommandLogFile = undefined;
@@ -272,13 +307,21 @@ export const logger = {
   },
 
   /**
-   * Start a new LLM call log file. Creates the markdown file with a header.
-   * Subsequent calls to logLLMStep/logLLMInput/logLLMOutput append to this file.
+   * Start a new LLM call log file. Creates the markdown file with a header
+   * and opens a persistent WriteStream for real-time chunk streaming.
+   * Subsequent calls to logLLMStep/logLLMInput/logLLMOutput/logLLMChunk
+   * append to this stream immediately (visible in real time).
    */
   startLLMCallLog(symbolName: string, provider: string): void {
     if (!_llmLogDir) {
       return;
     }
+
+    // Close any previously active LLM log stream
+    _activeLLMLogStream?.end();
+    _activeLLMLogStream = undefined;
+    _activeLLMLogFile = undefined;
+
     try {
       fs.mkdirSync(_llmLogDir, { recursive: true });
       _llmCallCounter++;
@@ -286,6 +329,9 @@ export const logger = {
       const safeName = symbolName.replace(/[^a-zA-Z0-9_-]/g, '_');
       const fileName = `${seq}-${safeName}-call.md`;
       _activeLLMLogFile = path.join(_llmLogDir, fileName);
+
+      // Open a persistent WriteStream so all writes flush immediately
+      _activeLLMLogStream = fs.createWriteStream(_activeLLMLogFile, { flags: 'w' });
 
       const header =
         `# LLM Call: ${symbolName}\n\n` +
@@ -295,9 +341,10 @@ export const logger = {
         `---\n\n` +
         `## Agent Progress\n\n`;
 
-      fs.writeFileSync(_activeLLMLogFile, header, 'utf-8');
+      _activeLLMLogStream.write(header);
       emit(LogLevel.INFO, `LLM call log: ${_activeLLMLogFile}`, []);
     } catch {
+      _activeLLMLogStream = undefined;
       _activeLLMLogFile = undefined;
       emit(LogLevel.WARN, `Failed to start LLM call log for "${symbolName}"`, []);
     }
@@ -308,12 +355,12 @@ export const logger = {
    * Use this to trace what the agent is thinking/deciding at each stage.
    */
   logLLMStep(message: string): void {
-    if (!_activeLLMLogFile) {
+    if (!_activeLLMLogStream) {
       return;
     }
     try {
       const line = `- \`${timestamp()}\` ${message}\n`;
-      fs.appendFileSync(_activeLLMLogFile, line, 'utf-8');
+      _activeLLMLogStream.write(line);
     } catch {
       // silently skip
     }
@@ -323,22 +370,23 @@ export const logger = {
    * Append the full prompt (input) section to the active LLM log file.
    */
   logLLMInput(prompt: string): void {
-    if (!_activeLLMLogFile) {
+    if (!_activeLLMLogStream) {
       return;
     }
     try {
       const section = `\n---\n\n` + `## Input (Prompt)\n\n` + '```\n' + prompt + '\n```\n\n';
-      fs.appendFileSync(_activeLLMLogFile, section, 'utf-8');
+      _activeLLMLogStream.write(section);
     } catch {
       // silently skip
     }
   },
 
   /**
-   * Append the full response (output) section to the active LLM log file.
+   * Append the full response (output) section to the active LLM log file
+   * and close the stream.
    */
   logLLMOutput(response: string): void {
-    if (!_activeLLMLogFile) {
+    if (!_activeLLMLogStream) {
       return;
     }
     try {
@@ -348,9 +396,13 @@ export const logger = {
         `## Output (Response)\n\n` +
         response +
         '\n';
-      fs.appendFileSync(_activeLLMLogFile, section, 'utf-8');
-      _activeLLMLogFile = undefined; // done with this log
+      _activeLLMLogStream.write(section);
+      _activeLLMLogStream.end();
+      _activeLLMLogStream = undefined;
+      _activeLLMLogFile = undefined;
     } catch {
+      _activeLLMLogStream?.end();
+      _activeLLMLogStream = undefined;
       _activeLLMLogFile = undefined;
     }
   },
@@ -358,13 +410,14 @@ export const logger = {
   /**
    * Append a raw stdout chunk to the active LLM log file in real time.
    * Used to capture streaming CLI output as it arrives.
+   * Uses the persistent WriteStream so chunks are flushed to disk immediately.
    */
   logLLMChunk(chunk: string): void {
-    if (!_activeLLMLogFile) {
+    if (!_activeLLMLogStream) {
       return;
     }
     try {
-      fs.appendFileSync(_activeLLMLogFile, chunk, 'utf-8');
+      _activeLLMLogStream.write(chunk);
     } catch {
       // silently skip
     }

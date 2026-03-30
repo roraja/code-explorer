@@ -6,6 +6,9 @@
     "03-add-explore-all-file-symbols-command.md": true,
     "03-update-context-files.md": true,
     "08-add-install-global-skills-command.md": true,
-    "11-add-ado-pull-push-commands.md": true
+    "11-add-ado-pull-push-commands.md": true,
+    "16-ten-improvement-ideas.md": true,
+    "22-symbol-link-navigate-to-source.md": true,
+    "32-process-monitor-and-build-service-provider.md": true
   }
 }

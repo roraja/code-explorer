@@ -462,6 +462,12 @@ export interface AnalysisMetadata {
   analysisVersion: string;
   /** Whether the source file has changed since this analysis was run */
   stale: boolean;
+  /**
+   * Relative path from workspace root to the cache markdown file.
+   * Set when the result is read from or written to the cache.
+   * Example: ".vscode/code-explorer/src/main.cpp/fn.printBanner.md"
+   */
+  cacheFilePath?: string;
 }
 
 // =====================

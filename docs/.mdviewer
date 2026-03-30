@@ -7,6 +7,8 @@
     "04-lld_detailed_design.md": true,
     "05-implementation_plan.md": true,
     "06-data_model_and_cache.md": true,
-    "07-ui_ux_design.md": true
+    "07-ui_ux_design.md": true,
+    "08-mcp_and_api_design.md": true,
+    "99-next-prompts.md": true
   }
 }

@@ -9,7 +9,7 @@ const config = {
   entryPoints: ['src/extension.ts'],
   bundle: true,
   outfile: 'dist/extension.js',
-  external: ['vscode'],
+  external: ['vscode', 'tree-sitter', 'tree-sitter-cpp', 'tree-sitter-typescript'],
   format: 'cjs',
   platform: 'node',
   target: 'node20',

@@ -7,6 +7,7 @@
  * The webview is a pure renderer — it never owns state.
  */
 import * as vscode from 'vscode';
+import * as path from 'path';
 import type {
   SymbolInfo,
   CursorContext,
@@ -702,7 +703,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       // (directory scan + name matching) instead of exact-path cache.read()
       // which misses when the SymbolInfo lacks scopeChain / has wrong kind.
       if (filePath) {
-        const uri = vscode.Uri.file(`${workspaceRoot}/${filePath}`);
+        const uri = vscode.Uri.file(path.join(workspaceRoot, filePath));
         try {
           const doc = await vscode.workspace.openTextDocument(uri);
           const targetLine = Math.max(0, (line || 1) - 1);
@@ -785,7 +786,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       if (!workspaceRoot) {
         return;
       }
-      const uri = vscode.Uri.file(`${workspaceRoot}/${filePath}`);
+      const uri = vscode.Uri.file(path.join(workspaceRoot, filePath));
       const position = new vscode.Position(Math.max(0, line - 1), character);
       const doc = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(doc, {

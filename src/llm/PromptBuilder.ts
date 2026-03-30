@@ -10,6 +10,7 @@
  * VS Code symbol resolution stage.
  */
 import type { SymbolInfo, CursorContext, AnalysisResult } from '../models/types';
+import type { FileSymbolDescriptor } from '../analysis/StaticAnalyzer';
 import type { PromptStrategy, PromptContext } from './prompts/PromptStrategy';
 import { FunctionPromptStrategy } from './prompts/FunctionPromptStrategy';
 import { VariablePromptStrategy } from './prompts/VariablePromptStrategy';
@@ -538,6 +539,151 @@ Output a single machine-readable JSON block listing ALL symbol analyses for this
 7. **Callers**: List functions/methods in THIS file that call each symbol. For cross-file callers, include what you can determine from the visible code.
 8. **Cache file path**: Must follow the naming convention exactly so the extension can look up these entries later.
 9. **Line numbers**: Use 0-based line numbers matching the source code.
+10. **Be accurate**: Only state facts you can determine from the source code. Don't hallucinate callers or dependencies.`;
+  }
+
+  /**
+   * Build a lightweight prompt for file-level analysis using a pre-discovered
+   * list of symbol names from the VS Code document symbol provider.
+   *
+   * Unlike `buildFileAnalysis`, this does NOT include the full source code
+   * in the prompt. Since the LLM (copilot/claude) runs in the workspace
+   * context, it can access the file directly. The prompt simply names the
+   * file and lists the symbols to investigate, reducing prompt size and
+   * avoiding token waste on large files.
+   *
+   * @param filePath    Relative path from workspace root
+   * @param symbols     Symbol descriptors discovered by StaticAnalyzer.listFileSymbols()
+   * @param cacheRoot   Absolute path to the cache root directory
+   */
+  static buildFileAnalysisFromSymbolList(
+    filePath: string,
+    symbols: FileSymbolDescriptor[],
+    cacheRoot?: string
+  ): string {
+    const lang = this._guessLanguage(filePath);
+
+    logger.debug(
+      `PromptBuilder.buildFileAnalysisFromSymbolList: file="${filePath}" — ` +
+        `${symbols.length} symbols discovered, lang: ${lang || 'unknown'}`
+    );
+
+    // Build a readable list of symbols for the prompt
+    const symbolList = symbols
+      .map((s) => {
+        const scope = s.scopeChain.length > 0 ? ` (in ${s.scopeChain.join('.')})` : '';
+        return `- **${s.kind}** \`${s.name}\` at line ${s.line}${scope}`;
+      })
+      .join('\n');
+
+    return `You are analyzing a source file to document specific symbols. The file is available in your workspace context — read it directly to perform the analysis.
+
+## File
+**Path:** \`${filePath}\`
+**Language:** ${lang || 'unknown'}
+
+## Symbols to Analyze
+
+The following ${symbols.length} symbols were discovered in this file using static analysis. Investigate each one by reading the file:
+
+${symbolList}
+
+## Task
+
+Read the file \`${filePath}\` and analyze **each symbol listed above**. For each symbol, produce a full analysis entry.
+
+### Cache File Naming Convention
+
+Each symbol's analysis is cached as a markdown file. The cache key pattern is:
+- File path: \`<cache_root>/<source_file_path>/<cache_key>.md\`
+- Cache key format: \`<scope_chain_dot_separated>.<kind_prefix>.<sanitized_name>\`
+- If no scope chain: \`<kind_prefix>.<sanitized_name>\`
+- If containerName but no scope chain: \`<containerName>.<kind_prefix>.<sanitized_name>\`
+
+Kind prefixes: class->"class", function->"fn", method->"method", variable->"var", interface->"interface", type->"type", enum->"enum", property->"prop", parameter->"param", struct->"struct", unknown->"sym"
+
+${cacheRoot ? 'Cache root: `' + cacheRoot + '`' : 'Cache root: `.vscode/code-explorer`'}
+
+### Output Format
+
+Output a single machine-readable JSON block listing ALL symbol analyses for this file:
+
+\`\`\`json:file_symbol_analyses
+[
+  {
+    "cache_file_path": "${filePath}/<cache_key>.md",
+    "name": "SymbolName",
+    "kind": "function",
+    "filePath": "${filePath}",
+    "line": 10,
+    "container": null,
+    "scope_chain": [],
+    "overview": "2-3 sentence description of what this symbol does, its purpose, and role in the codebase.",
+    "key_points": ["Important characteristic 1", "Important characteristic 2"],
+    "steps": [
+      { "step": 1, "description": "First thing this function/method does" }
+    ],
+    "sub_functions": [
+      {
+        "name": "calledFunction",
+        "description": "What it does",
+        "input": "(param: type) — description",
+        "output": "returnType — description",
+        "filePath": "src/path/to/file.ts",
+        "line": 15,
+        "kind": "function"
+      }
+    ],
+    "function_inputs": [
+      {
+        "name": "paramName",
+        "typeName": "ParamType",
+        "description": "What it represents",
+        "mutated": false
+      }
+    ],
+    "function_output": {
+      "typeName": "ReturnType",
+      "description": "What is returned"
+    },
+    "class_members": [
+      {
+        "name": "memberName",
+        "memberKind": "field",
+        "typeName": "MemberType",
+        "visibility": "private",
+        "isStatic": false,
+        "description": "Brief description",
+        "line": 15
+      }
+    ],
+    "callers": [
+      {
+        "name": "callerName",
+        "filePath": "src/path/to/file.ts",
+        "line": 42,
+        "kind": "function",
+        "context": "How it uses this symbol"
+      }
+    ],
+    "dependencies": ["dep1", "dep2"],
+    "usage_pattern": "How this symbol is typically used",
+    "potential_issues": ["Issue 1"]
+  }
+]
+\`\`\`
+
+### Rules
+
+1. **Analyze exactly the symbols listed above** — read the file to understand each one.
+2. **Methods inside classes**: For methods, set \`container\` to the class name and \`scope_chain\` to \`["ClassName"]\`. The cache key should be \`ClassName.method.methodName\`.
+3. **Nested symbols**: For symbols inside other symbols, build the full scope chain.
+4. **Steps and sub-functions**: Only include for functions/methods. Use empty arrays for classes, interfaces, enums, variables.
+5. **Class members**: Only include for classes/structs/interfaces. Use empty array for functions/variables.
+6. **Function inputs/output**: Only include for functions/methods. Use empty array / null for others.
+7. **Callers**: List functions/methods in THIS file that call each symbol. For cross-file callers, include what you can determine from reading the code.
+8. **Cache file path**: Must follow the naming convention exactly so the extension can look up these entries later.
+9. **Line numbers**: Use the 0-based line numbers provided above (they come from the language server and are accurate).
 10. **Be accurate**: Only state facts you can determine from the source code. Don't hallucinate callers or dependencies.`;
   }
 

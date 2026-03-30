@@ -1200,10 +1200,15 @@ function renderAnalysis(tab: Tab): string {
     );
   }
 
-  // Timestamp
+  // Timestamp + cache file path
   if (a.metadata?.analyzedAt) {
     const time = new Date(a.metadata.analyzedAt).toLocaleString();
-    sections.push(`<div class="metadata">Analyzed: ${esc(time)}</div>`);
+    const cachePath = a.metadata?.cacheFilePath
+      ? `<span class="metadata__cache-path file-link" data-file="${esc(a.metadata.cacheFilePath)}" data-line="1" data-char="0" title="Click to open cache file">${esc(a.metadata.cacheFilePath)}</span>`
+      : '';
+    sections.push(
+      `<div class="metadata">Analyzed: ${esc(time)}${cachePath ? ` · ${cachePath}` : ''}</div>`
+    );
   }
 
   return `<div class="analysis-content">${sections.join('')}</div>`;

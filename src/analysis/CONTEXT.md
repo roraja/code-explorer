@@ -31,10 +31,11 @@ Returns `{ symbol: SymbolInfo, result: AnalysisResult }`.
 Analyzes an entire file in a single LLM call, identifying and caching all crucial symbols:
 
 1. **Check LLM availability**
-2. **Build file analysis prompt** — `PromptBuilder.buildFileAnalysis()`.
-3. **LLM call** — Sends full file source with larger token budget (16384).
-4. **Parse response** — `ResponseParser.parseFileSymbolAnalyses()`. Extracts `json:file_symbol_analyses` block.
-5. **Write cache** — Each parsed symbol is written as an individual cache file (skips existing non-stale entries).
+2. **Discover symbols** — `StaticAnalyzer.listFileSymbols()` uses VS Code's document symbol provider to enumerate all symbols in the file.
+3. **Build prompt** — If symbols were discovered, uses `PromptBuilder.buildFileAnalysisFromSymbolList()` with just the file path and symbol names (no source code — the LLM runs in workspace context and can read the file). Falls back to `PromptBuilder.buildFileAnalysis()` with full source if the language server returns no symbols.
+4. **LLM call** — Larger token budget (16384).
+5. **Parse response** — `ResponseParser.parseFileSymbolAnalyses()`. Extracts `json:file_symbol_analyses` block.
+6. **Write cache** — Each parsed symbol is written as an individual cache file (skips existing non-stale entries).
 
 Returns number of symbols cached.
 

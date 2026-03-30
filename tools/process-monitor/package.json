@@ -1,0 +1,12 @@
+{
+  "name": "copilot-process-monitor",
+  "version": "1.0.0",
+  "description": "Web-based process monitor for copilot/claude CLI processes with live logs, stdin/stdout/stderr capture, and process control",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {}
+}

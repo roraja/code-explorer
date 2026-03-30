@@ -4,6 +4,43 @@ All notable changes to the "Code Explorer" extension will be documented in this 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-30
+
+### Added
+- **Tree-sitter symbol indexing** — AST-based deterministic symbol identification with C++ and TypeScript extractors, overload discrimination via parameter signature hashing, in-memory index with 4 lookup strategies (byAddress, byName, byFile, resolveAtCursor), and JSON persistence
+- **Build service LLM provider** — HTTP-based provider that submits analysis jobs to a remote Go build service, polls with incremental log streaming, and collects file-based output
+- **Show Symbol Info command** — Diagnostic command that queries 11 VS Code intellisense providers (document symbols, definitions, type definitions, hover, references, call hierarchy, type hierarchy, implementations, signature help, highlights, completions) with symbol address derivation
+- **Shared symbol helpers** (`src/utils/symbolHelpers.ts`) — Extracted `findDeepestSymbol`, `mapVscodeSymbolKind`, `buildScopeChainForPosition` from duplicated code
+- **Dependency graph, hover cards, CodeLens, and navigation history**
+- **Interactive Q&A** for analyzed symbols
+- **Mermaid diagram generation and rendering** in analysis pipeline and webview
+- **Clickable file:line references** in webview to navigate to source
+- **ADO pull/push content sync** commands
+- **Auto-link symbols** in analysis text
+- **Tab session persistence** across window reloads
+- **Skills installer** for global Claude/Copilot analysis skills
+- **Process monitor tool** (`tools/process-monitor/`)
+- **POC tree-sitter scripts** (`poc/tree-sitter/`)
+- Unit tests for indexing module (SymbolAddress, SymbolIndex, Extractors) and BuildServiceProvider
+
+### Changed
+- StaticAnalyzer: added `listFileSymbols()` for static symbol discovery
+- AnalysisOrchestrator: integrated static symbol list into file analysis, added cache-on-cursor-hit promotion
+- PromptBuilder: added `buildFileAnalysisFromSymbolList()` for targeted file analysis
+- CacheStore: added address-based cache operations and cache file path display
+- SymbolResolver: refactored to use shared symbolHelpers
+- CLI utility: added stdout/stderr separation and streaming log support
+- Logger: added sequential LLM log numbering and streaming chunk capture
+- LLMProviderFactory: registered build-service provider
+- Logger: moved logs to `code-explorer-logs/` and added per-command log files
+- esbuild: marked tree-sitter native modules as external
+
+### Fixed
+- Stripped JSON blocks from overview text to prevent raw JSON in rendered output
+- Hardened ResponseParser and ADO sync error handling
+
+## [0.2.0] - 2026-03-15
+
 ### Added
 - Project scaffolding and directory structure
 - TypeScript configuration for extension and webview

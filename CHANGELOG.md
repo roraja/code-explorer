@@ -4,6 +4,18 @@ All notable changes to the "Code Explorer" extension will be documented in this 
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-03-30
+
+### Fixed
+- **Windows compatibility**: `isAvailable()` in CopilotCLIProvider and MaiClaudeProvider used Unix-only `which` command; now uses `where` on Windows
+- **Windows compatibility**: `spawn()` calls in CLI runner and ADO sync now use `shell: true` on Windows to resolve `.cmd`/`.bat` shims (copilot, claude, git)
+- **Windows compatibility**: HoverProvider and CodeLensProvider cross-drive path detection now checks `path.isAbsolute()` in addition to `startsWith('..')`
+- **Bloated .vsix package**: Added `poc/`, `tools/`, `.claude/`, `.context/`, `CLAUDE.md`, `**/CONTEXT.md` to `.vscodeignore` — reduced package from 10.65 MB to 882 KB
+- **Missing build-service config**: Added `build-service` to `llmProvider` enum in `package.json` and declared `buildServiceUrl`, `buildServiceModel`, `buildServiceAgentBackend` configuration properties
+
+### Changed
+- **ADO sync rewrite**: Pull now clones the ADO repo into `.vscode/code-explorer/` as a standalone git repo with `origin` set to ADO; push uses standard `pull → add → commit → push` workflow instead of git plumbing commands
+
 ## [0.3.0] - 2026-03-30
 
 ### Added

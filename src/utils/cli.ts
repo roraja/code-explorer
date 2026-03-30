@@ -65,6 +65,9 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
       env,
       cwd: cwd || process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
+      // On Windows, spawn doesn't search for .cmd/.bat extensions without shell:true.
+      // CLI tools installed via npm (copilot, claude) are often .cmd shims on Windows.
+      shell: process.platform === 'win32',
     });
 
     const pid = child.pid;

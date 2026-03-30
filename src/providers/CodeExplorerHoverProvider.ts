@@ -45,8 +45,8 @@ export class CodeExplorerHoverProvider implements vscode.HoverProvider {
 
     const relPath = path.relative(this._workspaceRoot, document.fileName);
 
-    // Skip files outside the workspace
-    if (relPath.startsWith('..')) {
+    // Skip files outside the workspace (on Windows, cross-drive paths are absolute)
+    if (relPath.startsWith('..') || path.isAbsolute(relPath)) {
       return null;
     }
 

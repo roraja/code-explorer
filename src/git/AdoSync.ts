@@ -38,6 +38,8 @@ function _runGit(
     const child = spawn('git', args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
+      // On Windows, spawn needs shell:true to resolve .cmd/.bat shims
+      shell: process.platform === 'win32',
     });
 
     let stdout = '';
@@ -75,6 +77,8 @@ function _runGitEnv(
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...envOverrides },
+      // On Windows, spawn needs shell:true to resolve .cmd/.bat shims
+      shell: process.platform === 'win32',
     });
 
     let stdout = '';

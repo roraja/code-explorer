@@ -35,7 +35,9 @@ export class CopilotCLIProvider implements LLMProvider {
 
   async isAvailable(): Promise<boolean> {
     try {
-      await execFileAsync('which', ['copilot']);
+      // Use 'where' on Windows, 'which' on Unix to locate the CLI binary
+      const cmd = process.platform === 'win32' ? 'where' : 'which';
+      await execFileAsync(cmd, ['copilot']);
       logger.debug('copilot CLI is available');
       return true;
     } catch {

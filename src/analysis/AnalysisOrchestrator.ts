@@ -12,7 +12,6 @@
  * - analyzeFromCursor(cursor): Takes raw CursorContext, asks the LLM to both
  *   identify the symbol kind and perform analysis in one call (fast path)
  */
-import * as vscode from 'vscode';
 import type {
   AnalysisResult,
   AnalysisProgressCallback,
@@ -29,7 +28,7 @@ import {
   ResolvedSymbolIdentity,
   RelatedSymbolCacheEntry,
 } from '../llm/ResponseParser';
-import { StaticAnalyzer } from './StaticAnalyzer';
+import type { ISourceReader } from '../api/ISourceReader';
 import { ANALYSIS_VERSION, STATIC_ANALYSIS_TIMEOUT_MS } from '../models/constants';
 import { buildAddress } from '../indexing/SymbolAddress';
 import type { SymbolIndex } from '../indexing/SymbolIndex';
@@ -59,11 +58,36 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T, label: str
 }
 
 export class AnalysisOrchestrator {
-  private readonly _onAnalysisComplete = new vscode.EventEmitter<AnalysisResult>();
-  readonly onAnalysisComplete = this._onAnalysisComplete.event;
+  private _onAnalysisCompleteCallbacks: ((result: AnalysisResult) => void)[] = [];
+
+  /**
+   * Register a callback to be called when analysis completes.
+   * Returns a disposable that removes the callback.
+   */
+  onAnalysisComplete(callback: (result: AnalysisResult) => void): { dispose: () => void } {
+    this._onAnalysisCompleteCallbacks.push(callback);
+    return {
+      dispose: () => {
+        const idx = this._onAnalysisCompleteCallbacks.indexOf(callback);
+        if (idx >= 0) {
+          this._onAnalysisCompleteCallbacks.splice(idx, 1);
+        }
+      },
+    };
+  }
+
+  private _fireAnalysisComplete(result: AnalysisResult): void {
+    for (const cb of this._onAnalysisCompleteCallbacks) {
+      try {
+        cb(result);
+      } catch {
+        // Callback errors should not break the pipeline
+      }
+    }
+  }
 
   constructor(
-    private readonly _staticAnalyzer: StaticAnalyzer,
+    private readonly _sourceReader: ISourceReader,
     private readonly _llmProvider: LLMProvider,
     private readonly _cache: CacheStore,
     private readonly _workspaceRoot?: string,
@@ -112,7 +136,7 @@ export class AnalysisOrchestrator {
                 `returning cached result (provider: ${cached.metadata.llmProvider}, ` +
                 `analyzed: ${cached.metadata.analyzedAt}). No re-analysis needed.`
             );
-            this._onAnalysisComplete.fire(cached);
+            this._fireAnalysisComplete(cached);
             return cached;
           } else if (cached.metadata.stale) {
             logger.logLLMStep(
@@ -159,7 +183,7 @@ export class AnalysisOrchestrator {
     onProgress?.('reading-source');
     logger.logLLMStep('Reading symbol source code...');
     const sourceCode = await withTimeout(
-      this._staticAnalyzer.readSymbolSource(symbol),
+      this._sourceReader.readSymbolSource(symbol),
       STATIC_ANALYSIS_TIMEOUT_MS,
       '',
       'readSymbolSource'
@@ -171,7 +195,7 @@ export class AnalysisOrchestrator {
     if (symbol.kind === 'variable' || symbol.kind === 'property' || symbol.kind === 'parameter') {
       logger.logLLMStep('Reading containing scope source for variable/property analysis...');
       containingScopeSource = await withTimeout(
-        this._staticAnalyzer.readContainingScopeSource(symbol),
+        this._sourceReader.readContainingScopeSource(symbol),
         STATIC_ANALYSIS_TIMEOUT_MS,
         '',
         'readContainingScopeSource'
@@ -307,7 +331,7 @@ export class AnalysisOrchestrator {
         (llmProviderName ? ` (with ${llmProviderName})` : ' (no LLM)')
     );
 
-    this._onAnalysisComplete.fire(result);
+    this._fireAnalysisComplete(result);
     return result;
   }
 
@@ -347,7 +371,7 @@ export class AnalysisOrchestrator {
       `TIER 1: VS Code static analysis — resolving symbol at ${cursor.filePath}:${cursor.position.line}:${cursor.position.character}...`
     );
     const staticSymbol = await withTimeout(
-      this._staticAnalyzer.resolveSymbolAtPosition(
+      this._sourceReader.resolveSymbolAtPosition(
         cursor.filePath,
         cursor.position.line,
         cursor.position.character,
@@ -392,7 +416,7 @@ export class AnalysisOrchestrator {
           `Orchestrator: TIER 1 HIT for "${staticSymbol.name}" — ` +
             `static resolution + address cache (${elapsed}ms)`
         );
-        this._onAnalysisComplete.fire(cachedByAddress);
+        this._fireAnalysisComplete(cachedByAddress);
         return { symbol: staticSymbol, result: cachedByAddress };
       }
 
@@ -408,7 +432,7 @@ export class AnalysisOrchestrator {
               `Provider: ${cachedByKey.metadata.llmProvider}, ` +
               `Resolved in ${elapsed}ms — no LLM call needed.`
           );
-          this._onAnalysisComplete.fire(cachedByKey);
+          this._fireAnalysisComplete(cachedByKey);
           return { symbol: staticSymbol, result: cachedByKey };
         }
       } catch {
@@ -459,7 +483,7 @@ export class AnalysisOrchestrator {
           logger.logLLMStep(
             `TIER 2 CACHE HIT — address "${indexEntry.address}" resolved in ${elapsed}ms.`
           );
-          this._onAnalysisComplete.fire(cachedByAddress);
+          this._fireAnalysisComplete(cachedByAddress);
           return { symbol: indexSymbol, result: cachedByAddress };
         }
         logger.logLLMStep(`TIER 2 CACHE MISS — no cache for "${indexEntry.address}".`);
@@ -513,7 +537,7 @@ export class AnalysisOrchestrator {
           }
         }
 
-        this._onAnalysisComplete.fire(cached.result);
+        this._fireAnalysisComplete(cached.result);
         return cached;
       } else if (cached && cached.result.metadata.stale) {
         logger.logLLMStep(
@@ -712,7 +736,7 @@ export class AnalysisOrchestrator {
       `Orchestrator: unified analysis complete for "${resolvedSymbol.name}" (${resolvedSymbol.kind}) in ${elapsed}ms`
     );
 
-    this._onAnalysisComplete.fire(result);
+    this._fireAnalysisComplete(result);
     return { symbol: resolvedSymbol, result };
   }
 
@@ -890,7 +914,7 @@ export class AnalysisOrchestrator {
     // 2. Discover symbols using VS Code's static analysis
     onProgress?.('discovering-symbols', 'Discovering symbols via language server...');
     logger.logLLMStep('Discovering symbols using VS Code document symbol provider...');
-    const discoveredSymbols = await this._staticAnalyzer.listFileSymbols(filePath);
+    const discoveredSymbols = await this._sourceReader.listFileSymbols(filePath);
     logger.logLLMStep(`Discovered ${discoveredSymbols.length} symbols via language server`);
 
     // 3. Build prompt — lightweight (symbol list only) if symbols were discovered,
@@ -1085,7 +1109,7 @@ export class AnalysisOrchestrator {
     // Read the source code for additional context
     logger.logLLMStep('Reading symbol source code for context...');
     const sourceCode = await withTimeout(
-      this._staticAnalyzer.readSymbolSource(symbol),
+      this._sourceReader.readSymbolSource(symbol),
       STATIC_ANALYSIS_TIMEOUT_MS,
       '',
       'readSymbolSource'
@@ -1199,6 +1223,6 @@ export class AnalysisOrchestrator {
   }
 
   dispose(): void {
-    this._onAnalysisComplete.dispose();
+    this._onAnalysisCompleteCallbacks = [];
   }
 }

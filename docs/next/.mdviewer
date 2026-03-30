@@ -4,6 +4,7 @@
     "02-mermaid-diagrams-in-webview.md": true,
     "03-ten-improvement-ideas.md": true,
     "04-caching-mechanism-deep-dive.md": true,
-    "05-tree-sitter-symbol-index.md": true
+    "05-tree-sitter-symbol-index.md": true,
+    "06-public-api-refactoring-plan.md": true
   }
 }

@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { EXTENSION_DISPLAY_NAME, VIEW_ID, COMMANDS } from './models/constants';
 import { CodeExplorerViewProvider } from './ui/CodeExplorerViewProvider';
-import { StaticAnalyzer } from './analysis/StaticAnalyzer';
+import { VscodeSourceReader } from './providers/VscodeSourceReader';
 import { AnalysisOrchestrator } from './analysis/AnalysisOrchestrator';
 import { CacheStore } from './cache/CacheStore';
 import { LLMProviderFactory } from './llm/LLMProviderFactory';
@@ -42,11 +42,18 @@ export function activate(context: vscode.ExtensionContext): void {
   const llmProviderName = config.get<string>('llmProvider', 'copilot-cli');
 
   // --- LLM Layer ---
-  const llmProvider = LLMProviderFactory.create(llmProviderName, {
-    baseUrl: config.get<string>('buildServiceUrl', 'http://localhost:8090'),
-    model: config.get<string>('buildServiceModel', 'claude-opus-4.5'),
-    agentBackend: config.get<string>('buildServiceAgentBackend', ''),
-  });
+  const llmProvider = LLMProviderFactory.create(
+    llmProviderName,
+    {
+      baseUrl: config.get<string>('buildServiceUrl', 'http://localhost:8090'),
+      model: config.get<string>('buildServiceModel', 'claude-opus-4.5'),
+      agentBackend: config.get<string>('buildServiceAgentBackend', ''),
+    },
+    {
+      delayMs: config.get<number>('mockCopilotDelayMs', 3000),
+      extensionRoot: context.extensionUri.fsPath,
+    }
+  );
 
   // Set workspace root so the CLI provider runs with full workspace context
   if (llmProvider.setWorkspaceRoot) {
@@ -54,10 +61,10 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   // --- Analysis Layer ---
-  const staticAnalyzer = new StaticAnalyzer();
+  const sourceReader = new VscodeSourceReader();
   const cacheStore = new CacheStore(workspaceRoot);
   const orchestrator = new AnalysisOrchestrator(
-    staticAnalyzer,
+    sourceReader,
     llmProvider,
     cacheStore,
     workspaceRoot

@@ -188,12 +188,14 @@
             "copilot-cli",
             "mai-claude",
             "build-service",
+            "mock-copilot",
             "none"
           ],
           "enumDescriptions": [
             "Use GitHub Copilot CLI for AI analysis (copilot --yolo -s)",
             "Use mai-claude CLI for AI analysis (claude -p)",
             "Use remote build service for AI analysis (HTTP API)",
+            "Use mock AI agent for testing (node tools/mock-copilot.js)",
             "Disable AI analysis (static analysis only)"
           ],
           "description": "LLM provider for deep code analysis."
@@ -212,6 +214,13 @@
           "type": "string",
           "default": "",
           "description": "Agent backend for the build service, e.g. 'copilot', 'mai-claude', or 'claude' (used when llmProvider is 'build-service'). Leave empty for default."
+        },
+        "codeExplorer.mockCopilotDelayMs": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "Response delay in milliseconds for the mock-copilot provider (used when llmProvider is 'mock-copilot'). Simulates LLM latency."
         },
         "codeExplorer.autoAnalyzeOnSave": {
           "type": "boolean",
@@ -304,6 +313,8 @@
     "pretest": "npm run build && tsc -p tsconfig.test.json",
     "test": "node ./out/test/runTests.js",
     "test:unit": "TS_NODE_PROJECT=tsconfig.test.json mocha",
+    "test:api": "TS_NODE_PROJECT=tsconfig.test.json mocha 'test/unit/api/**/*.test.ts'",
+    "cli": "TS_NODE_PROJECT=tsconfig.test.json node -r ts-node/register src/cli/code-explorer-cli.ts",
     "package": "npm run build && vsce package --no-dependencies",
     "vscode:prepublish": "npm run build"
   },

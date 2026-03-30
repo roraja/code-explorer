@@ -42,6 +42,7 @@ export const CONFIG = {
   MAX_CALL_STACK_DEPTH: 'codeExplorer.maxCallStackDepth',
   SHOW_HOVER_CARDS: 'codeExplorer.showHoverCards',
   SHOW_CODE_LENS: 'codeExplorer.showCodeLens',
+  MOCK_COPILOT_DELAY_MS: 'codeExplorer.mockCopilotDelayMs',
 } as const;
 
 /** Cache directory and file constants. */

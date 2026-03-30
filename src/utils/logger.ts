@@ -3,12 +3,15 @@
  *
  * Dual-output logger:
  * 1. VS Code OutputChannel — visible in the "Code Explorer" output panel
+ *    (only when running inside VS Code extension host)
  * 2. File log — persisted at <workspace>/.vscode/code-explorer-logs/<date>.log
  *
  * Log files are rotated daily. All severity levels (DEBUG through ERROR) are
  * written to both destinations so nothing is lost.
+ *
+ * When running outside VS Code (CLI, tests), the OutputChannel is replaced
+ * by a no-op stub — logs still go to the file log and per-command/LLM logs.
  */
-import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { EXTENSION_DISPLAY_NAME } from '../models/constants';
@@ -27,7 +30,68 @@ const LEVEL_LABELS: Record<LogLevel, string> = {
   [LogLevel.ERROR]: 'ERROR',
 };
 
-let _channel: vscode.OutputChannel | undefined;
+// ── VS Code OutputChannel (lazy, optional) ─────────────────
+
+/**
+ * Minimal interface matching vscode.OutputChannel so we don't need
+ * a compile-time dependency on the vscode module.
+ */
+interface OutputChannelLike {
+  appendLine(value: string): void;
+  show(preserveFocus?: boolean): void;
+  dispose(): void;
+}
+
+let _channel: OutputChannelLike | undefined;
+let _vscodeAvailable: boolean | undefined;
+
+/**
+ * Check whether we're running inside a VS Code extension host.
+ * Result is cached after the first call.
+ */
+function isVscodeAvailable(): boolean {
+  if (_vscodeAvailable !== undefined) {
+    return _vscodeAvailable;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require.resolve('vscode');
+    _vscodeAvailable = true;
+  } catch {
+    _vscodeAvailable = false;
+  }
+  return _vscodeAvailable;
+}
+
+function getChannel(): OutputChannelLike {
+  if (!_channel) {
+    if (isVscodeAvailable()) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const vscode = require('vscode');
+        _channel = vscode.window.createOutputChannel(EXTENSION_DISPLAY_NAME);
+      } catch {
+        // Fallback: no-op channel
+        _channel = {
+          appendLine: () => {},
+          show: () => {},
+          dispose: () => {},
+        };
+      }
+    } else {
+      // Outside VS Code — no-op channel
+      _channel = {
+        appendLine: () => {},
+        show: () => {},
+        dispose: () => {},
+      };
+    }
+  }
+  return _channel!;
+}
+
+// ── State ──────────────────────────────────────────────────
+
 let _level: LogLevel = LogLevel.INFO;
 let _logDir: string | undefined;
 let _logStream: fs.WriteStream | undefined;
@@ -72,13 +136,6 @@ function findHighestSequenceNumber(dir: string, ext: string): number {
   } catch {
     return 0;
   }
-}
-
-function getChannel(): vscode.OutputChannel {
-  if (!_channel) {
-    _channel = vscode.window.createOutputChannel(EXTENSION_DISPLAY_NAME);
-  }
-  return _channel;
 }
 
 function timestamp(): string {
@@ -159,7 +216,7 @@ function emit(level: LogLevel, message: string, args: unknown[]): void {
 
   const line = formatLine(level, message, args);
 
-  // 1. VS Code output channel
+  // 1. VS Code output channel (no-op outside VS Code)
   getChannel().appendLine(line);
 
   // 2. File log (always, regardless of level filter — the file captures everything)
@@ -174,7 +231,7 @@ function emit(level: LogLevel, message: string, args: unknown[]): void {
   }
 }
 
-// ── public API (unchanged from before) ──────────────────
+// ── public API ──────────────────────────────────────────
 
 export const logger = {
   /**
@@ -224,8 +281,8 @@ export const logger = {
     _channel = undefined;
   },
 
-  /** Get the underlying output channel (for context.subscriptions). */
-  getOutputChannel(): vscode.OutputChannel {
+  /** Get the underlying output channel. */
+  getOutputChannel(): OutputChannelLike {
     return getChannel();
   },
 

@@ -10,7 +10,7 @@
  * VS Code symbol resolution stage.
  */
 import type { SymbolInfo, CursorContext, AnalysisResult } from '../models/types';
-import type { FileSymbolDescriptor } from '../analysis/StaticAnalyzer';
+import type { FileSymbolDescriptor } from '../api/ISourceReader';
 import type { PromptStrategy, PromptContext } from './prompts/PromptStrategy';
 import { FunctionPromptStrategy } from './prompts/FunctionPromptStrategy';
 import { VariablePromptStrategy } from './prompts/VariablePromptStrategy';

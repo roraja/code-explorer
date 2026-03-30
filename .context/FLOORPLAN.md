@@ -18,7 +18,8 @@ Only load additional contexts if the task clearly spans multiple modules.
 | If the task involves...                            | Read this context                           | Primary files                                         |
 |----------------------------------------------------|---------------------------------------------|-------------------------------------------------------|
 | Extension activation, command wiring, DI setup     | `src/CONTEXT.md`                            | `src/extension.ts`                                    |
-| Symbol resolution at cursor (legacy, not primary)  | `src/providers/CONTEXT.md`                  | `src/providers/SymbolResolver.ts`                     |
+| **Public API, standalone usage, CLI, tests**       | `src/api/CONTEXT.md`                        | `src/api/CodeExplorerAPI.ts`, `src/api/ISourceReader.ts`, `src/api/ILogger.ts` |
+| Symbol resolution at cursor (legacy, not primary)  | `src/providers/CONTEXT.md`                  | `src/providers/SymbolResolver.ts`, `src/providers/VscodeSourceReader.ts` |
 | Analysis pipeline, orchestration, static analysis  | `src/analysis/CONTEXT.md`                   | `src/analysis/AnalysisOrchestrator.ts`, `src/analysis/StaticAnalyzer.ts` |
 | LLM providers, CLI spawning, prompt building       | `src/llm/CONTEXT.md`                        | `src/llm/CopilotCLIProvider.ts`, `src/llm/MaiClaudeProvider.ts`, `src/llm/PromptBuilder.ts` |
 | Prompt strategies for different symbol kinds       | `src/llm/prompts/CONTEXT.md`               | `src/llm/prompts/*.ts`                                |
@@ -28,7 +29,8 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Types, interfaces, error hierarchy, constants      | `src/models/CONTEXT.md`                     | `src/models/types.ts`, `src/models/errors.ts`, `src/models/constants.ts` |
 | Logger, CLI runner utility                         | `src/utils/CONTEXT.md`                      | `src/utils/logger.ts`, `src/utils/cli.ts`             |
 | Webview UI rendering (browser-side)                | `webview/CONTEXT.md`                        | `webview/src/main.ts`, `webview/src/styles/main.css`  |
-| Tests (unit, integration)                          | `test/CONTEXT.md`                           | `test/unit/**/*.test.ts`                              |
+| Tests (unit, integration, API)                     | `test/CONTEXT.md`                           | `test/unit/**/*.test.ts`                              |
+| **CLI tool (standalone)**                          | `src/cli/CONTEXT.md`                        | `src/cli/code-explorer-cli.ts`                        |
 | Global skill installation (Claude + Copilot)       | `src/skills/CONTEXT.md`                     | `src/skills/SkillInstaller.ts`                        |
 | ADO content sync (pull/push)                       | `src/git/CONTEXT.md`                        | `src/git/AdoSync.ts`                                  |
 
@@ -71,6 +73,11 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Workspace-context CLI execution (cwd) | Implemented | `cli.ts`, `CopilotCLIProvider.ts`, `MaiClaudeProvider.ts` |
 | Install Global Skills command  | Implemented | `extension.ts`, `SkillInstaller.ts`            |
 | ADO content sync (pull/push)   | Implemented | `extension.ts`, `AdoSync.ts`                   |
+| **Public API (VS-Code-free)**  | Implemented | `CodeExplorerAPI.ts`, `ISourceReader.ts`, `ILogger.ts` |
+| **CLI tool (standalone)**      | Implemented | `src/cli/code-explorer-cli.ts`                 |
+| **FileSystemSourceReader**     | Implemented | `src/api/FileSystemSourceReader.ts`            |
+| **VscodeSourceReader**         | Implemented | `src/providers/VscodeSourceReader.ts`           |
+| **API integration tests (no VS Code)** | Implemented | `test/unit/api/*.test.ts` (23 tests)   |
 | Legacy SymbolResolver (VS Code API) | Preserved (not primary) | `SymbolResolver.ts` (not imported by `extension.ts`) |
 | **CacheManager/IndexManager**  | Not implemented | Planned in `src/cache/`                   |
 | **AnalysisQueue with priority** | Not implemented | Planned in `src/analysis/`               |
@@ -129,11 +136,22 @@ Programmatic call with SymbolInfo
   -> CodeExplorerViewProvider.openTab(symbol)
     -> AnalysisOrchestrator.analyzeSymbol(symbol)
       -> CacheStore.read() (exact-path lookup)
-      -> StaticAnalyzer.readSymbolSource()
+      -> ISourceReader.readSymbolSource()
       -> PromptBuilder.build() (kind-specific strategy)
       -> LLMProvider.analyze()
       -> ResponseParser.parse()
       -> CacheStore.write()
+```
+
+Standalone flow (CLI / tests, no VS Code):
+
+```
+CodeExplorerAPI constructed with FileSystemSourceReader + LLMProvider
+  -> api.exploreSymbol(cursor) / api.analyzeSymbol(symbol) / api.exploreFile(...)
+    -> AnalysisOrchestrator (same pipeline as above)
+      -> FileSystemSourceReader (reads files via fs, returns null for symbol resolution)
+      -> LLMProvider.analyze() (real CLI or MockLLMProvider)
+      -> CacheStore (same disk cache format)
 ```
 
 ## Build & Dev
@@ -141,12 +159,16 @@ Programmatic call with SymbolInfo
 ```bash
 npm run build              # Build extension + webview
 npm run watch              # Watch mode for both
-npm run test:unit          # Mocha unit tests
+npm run test:unit          # Mocha unit tests (all, including API tests)
+npm run test:api           # API integration tests only (no VS Code runtime)
+npm run cli -- <command>   # Run CLI tool (e.g., npm run cli -- help)
 npm run lint:fix           # ESLint with auto-fix
 npm run package            # Build + produce .vsix
 ```
 
 Single test: `TS_NODE_PROJECT=tsconfig.test.json npx mocha test/unit/models/errors.test.ts`
+
+CLI usage: `npm run cli -- read-cache --workspace . --file src/extension.ts --symbol activate --kind function`
 
 **F5 debug** launches Extension Development Host with `sample-workspace/` as workspace.
 

@@ -6,12 +6,12 @@
  * cloned repo directory:
  *
  *   .vscode/code-explorer/          ← cloned ADO repo (origin = ADO)
- *     .git/                         ← git history, branches: content + content-upstream
+ *     .git/                         ← git history, branches: content + upstream
  *     src/...                       ← cached analysis files
  *
  * Branches:
  *   - content          (user/roraja/code-explorer/content)
- *   - content-upstream (user/roraja/code-explorer/content-upstream)
+ *   - upstream (user/roraja/code-explorer/upstream)
  *
  * Pull/push commands switch to the correct branch automatically.
  *
@@ -53,7 +53,7 @@ const CONTENT_TARGET: SyncTarget = {
 };
 
 const UPSTREAM_TARGET: SyncTarget = {
-  branch: 'user/roraja/code-explorer/content-upstream',
+  branch: 'user/roraja/code-explorer/upstream',
   dir: '.vscode/code-explorer',
   label: 'ADO Upstream',
 };

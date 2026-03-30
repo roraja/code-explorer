@@ -642,6 +642,12 @@ export interface NavigationHistoryState {
   currentIndex: number;
   /** Pinned investigations saved by the user */
   pinnedInvestigations: PinnedInvestigation[];
+  /** Name of the current investigation (unsaved or matches a pinned one) */
+  currentInvestigationName: string;
+  /** ID of the pinned investigation this matches (null if unsaved/modified) */
+  currentInvestigationId: string | null;
+  /** Whether the current state differs from the saved investigation */
+  currentInvestigationDirty: boolean;
 }
 
 // =====================
@@ -679,6 +685,8 @@ export interface TabState {
   loadingStage?: LoadingStage;
   /** True while an enhance (Q&A) request is in progress — keeps existing content visible */
   enhancing?: boolean;
+  /** User-added notes for this tab (shown at top of analysis) */
+  notes?: string;
 }
 
 /** Root state for the explorer sidebar. */
@@ -753,7 +761,12 @@ export type WebviewToExtensionMessage =
   | { type: 'historyForward' }
   | { type: 'pinInvestigation'; name: string }
   | { type: 'unpinInvestigation'; investigationId: string }
-  | { type: 'restoreInvestigation'; investigationId: string };
+  | { type: 'restoreInvestigation'; investigationId: string }
+  | { type: 'reorderTabs'; tabIds: string[] }
+  | { type: 'updateNotes'; tabId: string; notes: string }
+  | { type: 'saveInvestigation' }
+  | { type: 'saveInvestigationAs'; name: string }
+  | { type: 'renameInvestigation'; name: string };
 
 // =====================
 // Queued Analysis

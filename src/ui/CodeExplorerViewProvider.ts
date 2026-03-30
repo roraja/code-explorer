@@ -49,6 +49,12 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
   private _investigationCounter = 0;
   /** Graph builder instance for generating dependency graphs */
   private _graphBuilder: GraphBuilder | null = null;
+  /** Name of the current investigation */
+  private _currentInvestigationName = 'Untitled Investigation';
+  /** ID of the saved investigation this matches (null if unsaved) */
+  private _currentInvestigationId: string | null = null;
+  /** Whether the current investigation has been modified since last save */
+  private _currentInvestigationDirty = false;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -645,6 +651,36 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         // The webview handles its own close — no action needed on extension side
         break;
       }
+
+      case 'reorderTabs': {
+        logger.debug(`ViewProvider: reorderTabs [${message.tabIds.join(', ')}]`);
+        this._reorderTabs(message.tabIds);
+        break;
+      }
+
+      case 'updateNotes': {
+        logger.debug(`ViewProvider: updateNotes for tab ${message.tabId}`);
+        this._updateTabNotes(message.tabId, message.notes);
+        break;
+      }
+
+      case 'saveInvestigation': {
+        logger.info('ViewProvider: saveInvestigation');
+        this._saveCurrentInvestigation();
+        break;
+      }
+
+      case 'saveInvestigationAs': {
+        logger.info(`ViewProvider: saveInvestigationAs "${message.name}"`);
+        this._saveCurrentInvestigationAs(message.name);
+        break;
+      }
+
+      case 'renameInvestigation': {
+        logger.info(`ViewProvider: renameInvestigation "${message.name}"`);
+        this._renameCurrentInvestigation(message.name);
+        break;
+      }
     }
   }
 
@@ -865,6 +901,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       this._navigationIndex = this._navigationHistory.length - 1;
     }
 
+    // Any new navigation makes the current investigation dirty
+    this._markInvestigationDirty();
+
     logger.debug(
       `ViewProvider._recordNavigation: ${trigger} → "${symbolName}" ` +
         `(history: ${this._navigationHistory.length} entries, index: ${this._navigationIndex})`
@@ -1025,6 +1064,11 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    // Set this as the current investigation
+    this._currentInvestigationName = investigation.name;
+    this._currentInvestigationId = investigation.id;
+    this._currentInvestigationDirty = false;
+
     // Find the first tab in the trail that still exists
     for (const tabId of investigation.trail) {
       const tab = this._tabs.find((t) => t.id === tabId);
@@ -1045,6 +1089,138 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
     );
   }
 
+  // =====================
+  // Tab Reordering & Notes
+  // =====================
+
+  /**
+   * Reorder tabs according to a new ordering of tab IDs.
+   * Called when the user drag-drops tabs in the sidebar.
+   */
+  private _reorderTabs(tabIds: string[]): void {
+    const reordered: TabState[] = [];
+    for (const id of tabIds) {
+      const tab = this._tabs.find((t) => t.id === id);
+      if (tab) {
+        reordered.push(tab);
+      }
+    }
+    // Append any tabs not in the provided list (shouldn't happen but be safe)
+    for (const tab of this._tabs) {
+      if (!reordered.includes(tab)) {
+        reordered.push(tab);
+      }
+    }
+    this._tabs = reordered;
+    this._markInvestigationDirty();
+    this._pushState();
+  }
+
+  /**
+   * Update the notes for a specific tab.
+   */
+  private _updateTabNotes(tabId: string, notes: string): void {
+    const tab = this._tabs.find((t) => t.id === tabId);
+    if (tab) {
+      tab.notes = notes || undefined;
+      this._markInvestigationDirty();
+      this._pushState();
+    }
+  }
+
+  // =====================
+  // Investigation Management
+  // =====================
+
+  /**
+   * Mark the current investigation as dirty (modified since last save).
+   */
+  private _markInvestigationDirty(): void {
+    this._currentInvestigationDirty = true;
+  }
+
+  /**
+   * Save the current investigation (overwrite the existing pinned one).
+   * Only works if _currentInvestigationId is set.
+   */
+  private _saveCurrentInvestigation(): void {
+    if (!this._currentInvestigationId) {
+      // No saved investigation to overwrite — save as new
+      this._saveCurrentInvestigationAs(this._currentInvestigationName);
+      return;
+    }
+
+    const existing = this._pinnedInvestigations.find(
+      (inv) => inv.id === this._currentInvestigationId
+    );
+    if (!existing) {
+      this._saveCurrentInvestigationAs(this._currentInvestigationName);
+      return;
+    }
+
+    // Overwrite the existing investigation
+    existing.name = this._currentInvestigationName;
+    existing.trail = this._tabs.map((t) => t.id);
+    existing.trailSymbols = this._tabs.map((t) => ({
+      tabId: t.id,
+      symbolName: t.symbol.name,
+      symbolKind: t.symbol.kind,
+    }));
+    existing.pinnedAt = new Date().toISOString();
+
+    this._currentInvestigationDirty = false;
+    logger.info(
+      `ViewProvider._saveCurrentInvestigation: updated "${existing.name}" ` +
+        `with ${existing.trail.length} symbols`
+    );
+    this._pushState();
+  }
+
+  /**
+   * Save the current investigation under a new name.
+   */
+  private _saveCurrentInvestigationAs(name: string): void {
+    const trail = this._tabs.map((t) => t.id);
+    const trailSymbols = this._tabs.map((t) => ({
+      tabId: t.id,
+      symbolName: t.symbol.name,
+      symbolKind: t.symbol.kind,
+    }));
+
+    if (trail.length === 0) {
+      logger.warn('ViewProvider._saveCurrentInvestigationAs: no tabs to save');
+      return;
+    }
+
+    const investigation: PinnedInvestigation = {
+      id: `inv-${++this._investigationCounter}`,
+      name,
+      trail,
+      trailSymbols,
+      pinnedAt: new Date().toISOString(),
+    };
+
+    this._pinnedInvestigations.push(investigation);
+    this._currentInvestigationName = name;
+    this._currentInvestigationId = investigation.id;
+    this._currentInvestigationDirty = false;
+
+    logger.info(
+      `ViewProvider._saveCurrentInvestigationAs: saved "${name}" ` +
+        `with ${trail.length} symbols as ${investigation.id}`
+    );
+    this._pushState();
+  }
+
+  /**
+   * Rename the current investigation (just the name, not a save).
+   */
+  private _renameCurrentInvestigation(name: string): void {
+    this._currentInvestigationName = name;
+    this._markInvestigationDirty();
+    this._pushState();
+  }
+
   /**
    * Build the navigation history state to send to the webview.
    */
@@ -1053,6 +1229,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       entries: this._navigationHistory,
       currentIndex: this._navigationIndex,
       pinnedInvestigations: this._pinnedInvestigations,
+      currentInvestigationName: this._currentInvestigationName,
+      currentInvestigationId: this._currentInvestigationId,
+      currentInvestigationDirty: this._currentInvestigationDirty,
     };
   }
 

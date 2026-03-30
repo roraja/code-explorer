@@ -27,6 +27,8 @@ interface Tab {
   loadingStage?: string;
   /** True while an enhance (Q&A) request is in progress */
   enhancing?: boolean;
+  /** User-added notes for this tab */
+  notes?: string;
 }
 
 /** Navigation entry from the extension's history stack */
@@ -53,6 +55,9 @@ interface NavigationHistoryState {
   entries: NavigationEntry[];
   currentIndex: number;
   pinnedInvestigations: PinnedInvestigation[];
+  currentInvestigationName: string;
+  currentInvestigationId: string | null;
+  currentInvestigationDirty: boolean;
 }
 
 const LOADING_STAGE_LABELS: Record<string, string> = {
@@ -201,12 +206,12 @@ function render(): void {
     renderTabBar() +
     '<div class="tab-resize-handle" id="tab-resize-handle"></div>' +
     '<div class="content-panel">' +
-    renderBreadcrumbBar() +
     renderContent(activeTab) +
     '</div>' +
     '</div>';
   attachListeners();
   _attachResizeHandle();
+  _attachDragAndDrop();
   renderMermaidDiagrams();
 }
 
@@ -244,7 +249,23 @@ function renderEmpty(): string {
 }
 
 function renderTabBar(): string {
-  // Reverse so newest tab appears first
+  // Investigation header
+  const invName = currentNavHistory?.currentInvestigationName || 'Untitled Investigation';
+  const isDirty = currentNavHistory?.currentInvestigationDirty ?? false;
+  const dirtyIndicator = isDirty ? '<span class="inv-header__dirty" title="Unsaved changes">*</span>' : '';
+
+  const invHeader = `<div class="inv-header">
+    <div class="inv-header__name-row">
+      <input class="inv-header__name-input" id="inv-name-input" type="text" value="${escAttr(invName)}" title="Investigation name" />
+      ${dirtyIndicator}
+    </div>
+    <div class="inv-header__actions">
+      <button class="inv-header__btn" id="inv-save-btn" title="Save investigation">\uD83D\uDCBE</button>
+      <button class="inv-header__btn" id="inv-save-as-btn" title="Save investigation as\u2026">+</button>
+    </div>
+  </div>`;
+
+  // Tab list (newest first, draggable)
   const tabs = [...currentTabs]
     .reverse()
     .map((tab) => {
@@ -252,87 +273,54 @@ function renderTabBar(): string {
       const icon = kindIcon(tab.symbol.kind);
       const statusDot =
         tab.status === 'loading'
-          ? '<span class="tab__status tab__status--loading">⟳</span>'
+          ? '<span class="tab__status tab__status--loading">\u27F3</span>'
           : tab.status === 'error'
-            ? '<span class="tab__status tab__status--error">✕</span>'
+            ? '<span class="tab__status tab__status--error">\u2715</span>'
             : '';
-      // Show scope context in tab label for nested symbols (e.g., "getUser › result")
+      // Show scope context in tab label for nested symbols (e.g., "getUser \u203A result")
       const scope =
         tab.symbol.scopeChain && tab.symbol.scopeChain.length > 0
-          ? tab.symbol.scopeChain[tab.symbol.scopeChain.length - 1] + ' › '
+          ? tab.symbol.scopeChain[tab.symbol.scopeChain.length - 1] + ' \u203A '
           : '';
-      return `<div class="tab${active}" data-tab-id="${tab.id}">
+      return `<div class="tab${active}" data-tab-id="${tab.id}" draggable="true">
         <span class="tab__icon">${icon}</span>
         <span class="tab__label" title="${esc((tab.symbol.scopeChain || []).concat(tab.symbol.name).join('.'))}">${esc(scope)}${esc(tab.symbol.name)}</span>
         ${statusDot}
-        <span class="tab__close" data-close-id="${tab.id}">×</span>
+        <span class="tab__close" data-close-id="${tab.id}">\u00D7</span>
       </div>`;
     })
     .join('');
 
-  return `<div class="tab-bar">${tabs}</div>`;
-}
-
-/**
- * Render the breadcrumb trail and navigation controls.
- */
-function renderBreadcrumbBar(): string {
-  if (!currentNavHistory || currentNavHistory.entries.length === 0) {
-    return '';
+  // Saved investigations list (lower section)
+  const investigations = currentNavHistory?.pinnedInvestigations || [];
+  let invListHtml = '';
+  if (investigations.length > 0) {
+    const items = investigations
+      .map((inv) => {
+        const symbolCount = inv.trailSymbols.length;
+        const isActive = currentNavHistory?.currentInvestigationId === inv.id;
+        const activeClass = isActive ? ' saved-inv--active' : '';
+        return `<div class="saved-inv${activeClass}" data-investigation-id="${inv.id}">
+          <span class="saved-inv__name" title="${esc(inv.name)}">${esc(inv.name)}</span>
+          <span class="saved-inv__count">${symbolCount}</span>
+          <button class="saved-inv__restore" data-restore-id="${inv.id}" title="Load">\u2197</button>
+          <button class="saved-inv__remove" data-unpin-id="${inv.id}" title="Delete">\u00D7</button>
+        </div>`;
+      })
+      .join('');
+    invListHtml = `<div class="saved-inv-list">${items}</div>`;
+  } else {
+    invListHtml = '<div class="saved-inv-list__empty">No saved investigations</div>';
   }
-  const { entries, currentIndex, pinnedInvestigations } = currentNavHistory;
-  const trail = _buildBreadcrumbTrail(entries, currentIndex);
-  if (trail.length === 0) {
-    return '';
-  }
-  const canGoBack = currentIndex > 0;
-  const canGoForward = currentIndex < entries.length - 1;
-  const backBtn = `<button class="breadcrumb-nav__btn${canGoBack ? '' : ' breadcrumb-nav__btn--disabled'}" id="history-back" title="Go back"${canGoBack ? '' : ' disabled'}>\u2190</button>`;
-  const forwardBtn = `<button class="breadcrumb-nav__btn${canGoForward ? '' : ' breadcrumb-nav__btn--disabled'}" id="history-forward" title="Go forward"${canGoForward ? '' : ' disabled'}>\u2192</button>`;
-  const crumbs = trail
-    .map((entry, i) => {
-      const isActive = entry.toTabId === currentActiveTabId;
-      const icon = kindIcon(entry.symbolKind);
-      const activeClass = isActive ? ' breadcrumb-item--active' : '';
-      return `<span class="breadcrumb-item${activeClass}" data-tab-id="${entry.toTabId}" title="${esc(entry.symbolName)} (${esc(entry.trigger)})"><span class="breadcrumb-item__icon">${icon}</span><span class="breadcrumb-item__name">${esc(entry.symbolName)}</span></span>${i < trail.length - 1 ? '<span class="breadcrumb-separator">\u203A</span>' : ''}`;
-    })
-    .join('');
-  const pinBtn =
-    trail.length > 1
-      ? '<button class="breadcrumb-nav__btn breadcrumb-nav__pin" id="pin-investigation" title="Pin this investigation trail">\uD83D\uDCCC</button>'
-      : '';
-  const investigationsList =
-    pinnedInvestigations.length > 0 ? _renderPinnedInvestigations(pinnedInvestigations) : '';
-  return `<div class="breadcrumb-bar"><div class="breadcrumb-nav">${backBtn}${forwardBtn}<div class="breadcrumb-trail">${crumbs}</div>${pinBtn}</div>${investigationsList}</div>`;
-}
 
-function _buildBreadcrumbTrail(
-  entries: NavigationEntry[],
-  currentIndex: number
-): NavigationEntry[] {
-  const trail: NavigationEntry[] = [];
-  const seen = new Set<string>();
-  for (let i = 0; i <= currentIndex && i < entries.length; i++) {
-    const entry = entries[i];
-    if (!seen.has(entry.toTabId)) {
-      seen.add(entry.toTabId);
-      trail.push(entry);
-    }
-  }
-  return trail;
-}
-
-function _renderPinnedInvestigations(investigations: PinnedInvestigation[]): string {
-  const items = investigations
-    .map((inv) => {
-      const trailPreview = inv.trailSymbols
-        .map((ts) => `${kindIcon(ts.symbolKind)} ${esc(ts.symbolName)}`)
-        .join(' \u203A ');
-      const time = new Date(inv.pinnedAt).toLocaleDateString();
-      return `<div class="pinned-investigation" data-investigation-id="${inv.id}"><div class="pinned-investigation__header"><span class="pinned-investigation__name" title="${esc(inv.name)}">${esc(inv.name)}</span><span class="pinned-investigation__time">${esc(time)}</span><button class="pinned-investigation__restore" data-restore-id="${inv.id}" title="Restore">\u2197</button><button class="pinned-investigation__remove" data-unpin-id="${inv.id}" title="Remove">\u00D7</button></div><div class="pinned-investigation__trail">${trailPreview}</div></div>`;
-    })
-    .join('');
-  return `<details class="pinned-investigations-section"><summary class="pinned-investigations__toggle">\uD83D\uDCCC Investigations (${investigations.length})</summary><div class="pinned-investigations__list">${items}</div></details>`;
+  return `<div class="tab-bar">
+    ${invHeader}
+    <div class="tab-bar__divider"></div>
+    <div class="tab-bar__tabs" id="tab-list">${tabs}</div>
+    <div class="tab-bar__divider"></div>
+    <div class="tab-bar__section-label">Saved Investigations</div>
+    <div class="tab-bar__investigations">${invListHtml}</div>
+  </div>`;
 }
 
 function renderContent(tab: Tab): string {
@@ -810,14 +798,24 @@ function renderAnalysis(tab: Tab): string {
       <span class="enhance-bar__spinner"></span>
       <span class="enhance-bar__label">Enhancing\u2026</span>
     </button>
+    <button class="notes-btn" data-tab-id="${tab.id}" title="Edit notes">\uD83D\uDCDD Notes</button>
   </div>`);
   } else {
     sections.push(`<div class="enhance-bar">
     <button class="enhance-bar__button" data-tab-id="${tab.id}">
-      <span class="enhance-bar__icon">✨</span>
+      <span class="enhance-bar__icon">\u2728</span>
       <span class="enhance-bar__label">Enhance</span>
     </button>
+    <button class="notes-btn" data-tab-id="${tab.id}" title="Edit notes">\uD83D\uDCDD Notes</button>
   </div>`);
+  }
+
+  // User notes (shown at top of analysis, before the LLM badge)
+  if (tab.notes) {
+    sections.push(`<div class="user-notes">
+      <div class="user-notes__label">\uD83D\uDCDD Notes</div>
+      <div class="user-notes__content">${esc(tab.notes).replace(/\n/g, '<br>')}</div>
+    </div>`);
   }
 
   // LLM badge
@@ -1299,6 +1297,102 @@ function _attachResizeHandle(): void {
 }
 
 // =====================
+// Drag and Drop (Tab Reordering)
+// =====================
+
+let _draggedTabId: string | null = null;
+
+function _attachDragAndDrop(): void {
+  const tabList = document.getElementById('tab-list');
+  if (!tabList) {
+    return;
+  }
+
+  tabList.querySelectorAll('.tab[draggable="true"]').forEach((el) => {
+    el.addEventListener('dragstart', (e) => {
+      const de = e as DragEvent;
+      const tabEl = de.currentTarget as HTMLElement;
+      _draggedTabId = tabEl.dataset.tabId || null;
+      tabEl.classList.add('tab--dragging');
+      if (de.dataTransfer) {
+        de.dataTransfer.effectAllowed = 'move';
+        de.dataTransfer.setData('text/plain', _draggedTabId || '');
+      }
+    });
+
+    el.addEventListener('dragend', () => {
+      (el as HTMLElement).classList.remove('tab--dragging');
+      _draggedTabId = null;
+      // Remove all drop indicators
+      tabList.querySelectorAll('.tab--drop-above, .tab--drop-below').forEach((t) => {
+        t.classList.remove('tab--drop-above', 'tab--drop-below');
+      });
+    });
+
+    el.addEventListener('dragover', (e) => {
+      const de = e as DragEvent;
+      de.preventDefault();
+      if (de.dataTransfer) {
+        de.dataTransfer.dropEffect = 'move';
+      }
+      const target = (de.currentTarget as HTMLElement);
+      const rect = target.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      // Remove indicators from siblings
+      tabList.querySelectorAll('.tab--drop-above, .tab--drop-below').forEach((t) => {
+        t.classList.remove('tab--drop-above', 'tab--drop-below');
+      });
+      if (de.clientY < midY) {
+        target.classList.add('tab--drop-above');
+      } else {
+        target.classList.add('tab--drop-below');
+      }
+    });
+
+    el.addEventListener('dragleave', () => {
+      (el as HTMLElement).classList.remove('tab--drop-above', 'tab--drop-below');
+    });
+
+    el.addEventListener('drop', (e) => {
+      const de = e as DragEvent;
+      de.preventDefault();
+      const target = de.currentTarget as HTMLElement;
+      const targetId = target.dataset.tabId;
+      target.classList.remove('tab--drop-above', 'tab--drop-below');
+
+      if (!_draggedTabId || !targetId || _draggedTabId === targetId) {
+        return;
+      }
+
+      // Compute new order: the tabs in the sidebar are rendered in reverse order,
+      // so we need to work with the display order (reversed), then reverse back.
+      const displayOrder = [...currentTabs].reverse().map((t) => t.id);
+      const fromIdx = displayOrder.indexOf(_draggedTabId);
+      const toIdx = displayOrder.indexOf(targetId);
+      if (fromIdx < 0 || toIdx < 0) {
+        return;
+      }
+
+      // Determine whether to place above or below
+      const rect = target.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      let insertIdx = de.clientY < midY ? toIdx : toIdx + 1;
+      if (fromIdx < insertIdx) {
+        insertIdx--;
+      }
+
+      // Reorder in display order
+      displayOrder.splice(fromIdx, 1);
+      displayOrder.splice(insertIdx, 0, _draggedTabId);
+
+      // Reverse back to storage order and send to extension
+      const newOrder = [...displayOrder].reverse();
+      vscode.postMessage({ type: 'reorderTabs', tabIds: newOrder });
+    });
+  });
+}
+
+// =====================
 // Event Listeners
 // =====================
 
@@ -1406,41 +1500,45 @@ function attachListeners(): void {
     });
   });
 
-  // Breadcrumb bar — back/forward navigation
-  const backBtn = document.getElementById('history-back');
-  if (backBtn) {
-    backBtn.addEventListener('click', () => {
-      vscode.postMessage({ type: 'historyBack' });
-    });
-  }
-
-  const forwardBtn = document.getElementById('history-forward');
-  if (forwardBtn) {
-    forwardBtn.addEventListener('click', () => {
-      vscode.postMessage({ type: 'historyForward' });
-    });
-  }
-
-  // Breadcrumb items — click to activate that tab
-  document.querySelectorAll('.breadcrumb-item').forEach((el) => {
+  // Notes button — opens notes editor dialog
+  document.querySelectorAll('.notes-btn').forEach((el) => {
     el.addEventListener('click', () => {
       const tabId = (el as HTMLElement).dataset.tabId;
       if (tabId) {
-        vscode.postMessage({ type: 'tabClicked', tabId });
+        _showNotesDialog(tabId);
       }
     });
   });
 
-  // Pin investigation button — shows a dialog to name the investigation
-  const pinBtn = document.getElementById('pin-investigation');
-  if (pinBtn) {
-    pinBtn.addEventListener('click', () => {
-      _showPinInvestigationDialog();
+  // Investigation name input — rename on change
+  const invNameInput = document.getElementById('inv-name-input') as HTMLInputElement | null;
+  if (invNameInput) {
+    invNameInput.addEventListener('change', () => {
+      const name = invNameInput.value.trim();
+      if (name) {
+        vscode.postMessage({ type: 'renameInvestigation', name });
+      }
     });
   }
 
-  // Pinned investigation restore buttons
-  document.querySelectorAll('.pinned-investigation__restore').forEach((el) => {
+  // Investigation save button
+  const invSaveBtn = document.getElementById('inv-save-btn');
+  if (invSaveBtn) {
+    invSaveBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'saveInvestigation' });
+    });
+  }
+
+  // Investigation save-as button
+  const invSaveAsBtn = document.getElementById('inv-save-as-btn');
+  if (invSaveAsBtn) {
+    invSaveAsBtn.addEventListener('click', () => {
+      _showSaveInvestigationAsDialog();
+    });
+  }
+
+  // Saved investigation restore buttons
+  document.querySelectorAll('.saved-inv__restore').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
       const investigationId = (el as HTMLElement).dataset.restoreId;
@@ -1450,8 +1548,8 @@ function attachListeners(): void {
     });
   });
 
-  // Pinned investigation remove buttons
-  document.querySelectorAll('.pinned-investigation__remove').forEach((el) => {
+  // Saved investigation remove buttons
+  document.querySelectorAll('.saved-inv__remove').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
       const investigationId = (el as HTMLElement).dataset.unpinId;
@@ -1562,46 +1660,136 @@ function _showEnhanceDialog(tabId: string): void {
 /**
  * Show a dialog to name and pin the current investigation trail.
  */
-function _showPinInvestigationDialog(): void {
-  const existing = document.getElementById('pin-dialog-overlay');
+// =====================
+// Notes Dialog
+// =====================
+
+/**
+ * Show a modal dialog for editing notes on a tab.
+ */
+function _showNotesDialog(tabId: string): void {
+  const tab = currentTabs.find((t) => t.id === tabId);
+  if (!tab) {
+    return;
+  }
+
+  const existing = document.getElementById('notes-dialog-overlay');
   if (existing) {
     existing.remove();
   }
 
   const overlay = document.createElement('div');
-  overlay.id = 'pin-dialog-overlay';
+  overlay.id = 'notes-dialog-overlay';
   overlay.className = 'enhance-dialog-overlay';
 
   overlay.innerHTML = `<div class="enhance-dialog">
     <div class="enhance-dialog__header">
-      <span class="enhance-dialog__title">\uD83D\uDCCC Pin Investigation</span>
-      <button class="enhance-dialog__close" id="pin-dialog-close">\u00D7</button>
+      <span class="enhance-dialog__title">\uD83D\uDCDD Edit Notes</span>
+      <button class="enhance-dialog__close" id="notes-dialog-close">\u00D7</button>
     </div>
     <div class="enhance-dialog__body">
-      <label class="enhance-dialog__label" for="pin-dialog-input">
-        Name this investigation trail:
+      <label class="enhance-dialog__label" for="notes-dialog-input">
+        Notes for ${esc(tab.symbol.name)}:
       </label>
-      <input
+      <textarea
         class="enhance-dialog__input"
-        id="pin-dialog-input"
-        type="text"
-        placeholder="e.g., Tracing the cache miss bug"
-      />
+        id="notes-dialog-input"
+        rows="6"
+        placeholder="Add your notes here..."
+      >${esc(tab.notes || '')}</textarea>
     </div>
     <div class="enhance-dialog__footer">
-      <button class="enhance-dialog__cancel" id="pin-dialog-cancel">Cancel</button>
-      <button class="enhance-dialog__submit" id="pin-dialog-submit">Pin</button>
+      <button class="enhance-dialog__cancel" id="notes-dialog-cancel">Cancel</button>
+      <button class="enhance-dialog__submit" id="notes-dialog-submit">Save</button>
     </div>
   </div>`;
 
   document.body.appendChild(overlay);
 
-  const input = document.getElementById('pin-dialog-input') as HTMLInputElement;
-  const submitBtn = document.getElementById('pin-dialog-submit') as HTMLButtonElement;
-  const cancelBtn = document.getElementById('pin-dialog-cancel') as HTMLButtonElement;
-  const closeBtn = document.getElementById('pin-dialog-close') as HTMLButtonElement;
+  const input = document.getElementById('notes-dialog-input') as HTMLTextAreaElement;
+  const submitBtn = document.getElementById('notes-dialog-submit') as HTMLButtonElement;
+  const cancelBtn = document.getElementById('notes-dialog-cancel') as HTMLButtonElement;
+  const closeBtn = document.getElementById('notes-dialog-close') as HTMLButtonElement;
 
   setTimeout(() => input.focus(), 50);
+
+  const close = (): void => {
+    overlay.remove();
+  };
+
+  const submit = (): void => {
+    const notes = input.value.trim();
+    vscode.postMessage({ type: 'updateNotes', tabId, notes });
+    close();
+  };
+
+  submitBtn.addEventListener('click', submit);
+  cancelBtn.addEventListener('click', close);
+  closeBtn.addEventListener('click', close);
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      close();
+    }
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      close();
+    }
+  });
+}
+
+// =====================
+// Save Investigation As Dialog
+// =====================
+
+function _showSaveInvestigationAsDialog(): void {
+  const existing = document.getElementById('save-inv-dialog-overlay');
+  if (existing) {
+    existing.remove();
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'save-inv-dialog-overlay';
+  overlay.className = 'enhance-dialog-overlay';
+
+  const currentName = currentNavHistory?.currentInvestigationName || 'Untitled Investigation';
+
+  overlay.innerHTML = `<div class="enhance-dialog">
+    <div class="enhance-dialog__header">
+      <span class="enhance-dialog__title">Save Investigation As</span>
+      <button class="enhance-dialog__close" id="save-inv-dialog-close">\u00D7</button>
+    </div>
+    <div class="enhance-dialog__body">
+      <label class="enhance-dialog__label" for="save-inv-dialog-input">
+        Name this investigation:
+      </label>
+      <input
+        class="enhance-dialog__input"
+        id="save-inv-dialog-input"
+        type="text"
+        value="${escAttr(currentName)}"
+        placeholder="e.g., Tracing the cache miss bug"
+      />
+    </div>
+    <div class="enhance-dialog__footer">
+      <button class="enhance-dialog__cancel" id="save-inv-dialog-cancel">Cancel</button>
+      <button class="enhance-dialog__submit" id="save-inv-dialog-submit">Save</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+
+  const input = document.getElementById('save-inv-dialog-input') as HTMLInputElement;
+  const submitBtn = document.getElementById('save-inv-dialog-submit') as HTMLButtonElement;
+  const cancelBtn = document.getElementById('save-inv-dialog-cancel') as HTMLButtonElement;
+  const closeBtn = document.getElementById('save-inv-dialog-close') as HTMLButtonElement;
+
+  setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 50);
 
   const close = (): void => {
     overlay.remove();
@@ -1614,8 +1802,8 @@ function _showPinInvestigationDialog(): void {
       input.focus();
       return;
     }
-    log(`pin investigation: "${name}"`);
-    vscode.postMessage({ type: 'pinInvestigation', name });
+    log(`save investigation as: "${name}"`);
+    vscode.postMessage({ type: 'saveInvestigationAs', name });
     close();
   };
 

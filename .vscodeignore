@@ -9,6 +9,12 @@ logs/**
 node_modules/**
 out/**
 sample-workspace/**
+poc/**
+tools/**
+.claude/**
+.context/**
+CLAUDE.md
+**/CONTEXT.md
 .gitignore
 .eslintrc.json
 .prettierrc

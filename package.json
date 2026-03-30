@@ -173,14 +173,31 @@
           "enum": [
             "copilot-cli",
             "mai-claude",
+            "build-service",
             "none"
           ],
           "enumDescriptions": [
             "Use GitHub Copilot CLI for AI analysis (copilot --yolo -s)",
             "Use mai-claude CLI for AI analysis (claude -p)",
+            "Use remote build service for AI analysis (HTTP API)",
             "Disable AI analysis (static analysis only)"
           ],
           "description": "LLM provider for deep code analysis."
+        },
+        "codeExplorer.buildServiceUrl": {
+          "type": "string",
+          "default": "http://localhost:8090",
+          "description": "Base URL of the build service (used when llmProvider is 'build-service')."
+        },
+        "codeExplorer.buildServiceModel": {
+          "type": "string",
+          "default": "claude-opus-4.5",
+          "description": "LLM model to use with the build service (used when llmProvider is 'build-service')."
+        },
+        "codeExplorer.buildServiceAgentBackend": {
+          "type": "string",
+          "default": "",
+          "description": "Agent backend for the build service, e.g. 'copilot', 'mai-claude', or 'claude' (used when llmProvider is 'build-service'). Leave empty for default."
         },
         "codeExplorer.autoAnalyzeOnSave": {
           "type": "boolean",

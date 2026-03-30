@@ -1,23 +1,31 @@
 /**
  * Code Explorer — ADO Content Sync
  *
- * Manages syncing code-explorer cache folders with an Azure DevOps (ADO)
- * git repository. Each sync target is a separate cloned repo:
+ * Manages syncing the .vscode/code-explorer cache folder with an
+ * Azure DevOps (ADO) git repository. Two branches share the same
+ * cloned repo directory:
  *
- *   .vscode/code-explorer/          ← "content" branch (your analyses)
- *   .vscode/code-explorer-upstream/ ← "content-upstream" branch (shared/team analyses)
+ *   .vscode/code-explorer/          ← cloned ADO repo (origin = ADO)
+ *     .git/                         ← git history, branches: content + content-upstream
+ *     src/...                       ← cached analysis files
  *
- * Both directories are standalone git repos with `origin` set to ADO.
+ * Branches:
+ *   - content          (user/roraja/code-explorer/content)
+ *   - content-upstream (user/roraja/code-explorer/content-upstream)
+ *
+ * Pull/push commands switch to the correct branch automatically.
  *
  * ## Pull
  *   - If the directory does not exist: `git clone -b <branch> <url> <dir>`
- *   - If it already exists: `git pull --ff-only`
+ *   - If it exists on a different branch: fetch + checkout target branch
+ *   - If it exists on the correct branch: `git pull --ff-only`
  *
  * ## Push
- *   1. `git pull --ff-only`
- *   2. `git add -A`
- *   3. `git commit -m "…"`
- *   4. `git push`
+ *   1. Switch to target branch (if needed)
+ *   2. `git pull --ff-only`
+ *   3. `git add -A`
+ *   4. `git commit -m "…"`
+ *   5. `git push`
  *
  * Remote URL: https://microsoft.visualstudio.com/Edge/_git/edgeinternal.ai
  */
@@ -46,7 +54,7 @@ const CONTENT_TARGET: SyncTarget = {
 
 const UPSTREAM_TARGET: SyncTarget = {
   branch: 'user/roraja/code-explorer/content-upstream',
-  dir: '.vscode/code-explorer-upstream',
+  dir: '.vscode/code-explorer',
   label: 'ADO Upstream',
 };
 
@@ -104,10 +112,35 @@ function _isGitRepo(contentDir: string): boolean {
   return existsSync(path.join(contentDir, '.git'));
 }
 
+/**
+ * Get the short name of the branch the repo currently has checked out.
+ * Returns null if it can't be determined.
+ */
+async function _currentBranch(repoDir: string): Promise<string | null> {
+  const result = await _runGit(['rev-parse', '--abbrev-ref', 'HEAD'], repoDir);
+  return result.code === 0 ? result.stdout.trim() : null;
+}
+
+/**
+ * Extract the short branch name from a full branch path.
+ * e.g. "user/roraja/code-explorer/content" → "content"
+ * (used for local branch names after clone --single-branch)
+ */
+function _shortBranch(fullBranch: string): string {
+  const lastSlash = fullBranch.lastIndexOf('/');
+  return lastSlash >= 0 ? fullBranch.substring(lastSlash + 1) : fullBranch;
+}
+
 // ── Generic pull / push ──────────────────────────────────
 
 /**
- * Pull (clone or fast-forward) a sync target.
+ * Pull (clone, switch branch, or fast-forward) a sync target.
+ *
+ * Since content and upstream share the same directory, pull handles
+ * three scenarios:
+ *   1. Directory doesn't exist → clone with the target branch
+ *   2. Exists, already on target branch → git pull --ff-only
+ *   3. Exists, on a different branch → fetch, checkout/create target branch, pull
  */
 async function _pull(target: SyncTarget, workspaceRoot: string): Promise<AdoSyncResult> {
   const details: string[] = [];
@@ -124,7 +157,7 @@ async function _pull(target: SyncTarget, workspaceRoot: string): Promise<AdoSync
       details.push(`  Into:   ${target.dir}`);
 
       const cloneResult = await _runGit(
-        ['clone', '--branch', target.branch, '--single-branch', ADO_REMOTE_URL, contentDir],
+        ['clone', '--branch', target.branch, ADO_REMOTE_URL, contentDir],
         workspaceRoot
       );
 
@@ -144,18 +177,61 @@ async function _pull(target: SyncTarget, workspaceRoot: string): Promise<AdoSync
 
       return {
         success: true,
-        message: `Cloned ADO repo into ${target.dir}. Origin is set to ADO.`,
+        message: `Cloned ADO repo into ${target.dir} (branch: ${_shortBranch(target.branch)}). Origin is set to ADO.`,
         details: details.join('\n'),
       };
     }
 
-    // ── Already a git repo — pull latest ─────────────────
+    // ── Already a git repo — check if we need to switch branches ──
+    const currentBranch = await _currentBranch(contentDir);
+    const targetShort = _shortBranch(target.branch);
+
     logger.info(
-      `AdoSync [${target.label}]: ${target.dir} is already a git repo — pulling latest ...`
+      `AdoSync [${target.label}]: ${target.dir} exists (on branch "${currentBranch}"), target is "${targetShort}"`
     );
     details.push(`${target.dir} already exists as a git repo`);
-    details.push('Running git pull ...');
+    details.push(`Current branch: ${currentBranch}`);
+    details.push(`Target branch:  ${targetShort}`);
 
+    if (currentBranch !== targetShort) {
+      // ── Switch to target branch ────────────────────────
+      details.push(`\nSwitching to branch "${targetShort}" ...`);
+
+      // Fetch all branches so the target branch ref is available
+      const fetchResult = await _runGit(['fetch', 'origin'], contentDir);
+      if (fetchResult.code !== 0) {
+        logger.warn(
+          `AdoSync [${target.label}]: fetch before branch switch had issues: ${fetchResult.stderr}`
+        );
+        details.push(`Fetch warning: ${fetchResult.stderr}`);
+      }
+
+      // Try checkout — the branch may already exist locally or need to be created from remote
+      let checkoutResult = await _runGit(['checkout', targetShort], contentDir);
+      if (checkoutResult.code !== 0) {
+        // Branch doesn't exist locally — create it tracking the remote
+        checkoutResult = await _runGit(
+          ['checkout', '-b', targetShort, `origin/${targetShort}`],
+          contentDir
+        );
+      }
+
+      if (checkoutResult.code !== 0) {
+        const errMsg = `Branch switch failed: ${checkoutResult.stderr || checkoutResult.stdout}`;
+        logger.error(`AdoSync [${target.label}]: ${errMsg}`);
+        details.push(errMsg);
+        return {
+          success: false,
+          message: `Failed to switch to branch "${targetShort}". ${checkoutResult.stderr}`,
+          details: details.join('\n'),
+        };
+      }
+
+      details.push(`Switched to branch "${targetShort}"`);
+    }
+
+    // ── Pull latest ──────────────────────────────────────
+    details.push('\nRunning git pull ...');
     const pullResult = await _runGit(['pull', '--ff-only'], contentDir);
 
     if (pullResult.code !== 0) {
@@ -175,7 +251,7 @@ async function _pull(target: SyncTarget, workspaceRoot: string): Promise<AdoSync
 
     return {
       success: true,
-      message: `Pulled latest changes into ${target.dir}.`,
+      message: `Pulled latest changes into ${target.dir} (branch: ${targetShort}).`,
       details: details.join('\n'),
     };
   } catch (err) {
@@ -191,7 +267,7 @@ async function _pull(target: SyncTarget, workspaceRoot: string): Promise<AdoSync
 }
 
 /**
- * Push a sync target: pull → stage → commit → push.
+ * Push a sync target: ensure correct branch → pull → stage → commit → push.
  */
 async function _push(target: SyncTarget, workspaceRoot: string): Promise<AdoSyncResult> {
   const details: string[] = [];
@@ -207,9 +283,36 @@ async function _push(target: SyncTarget, workspaceRoot: string): Promise<AdoSync
       };
     }
 
+    // ── Step 0: Ensure correct branch ────────────────────
+    const currentBranch = await _currentBranch(contentDir);
+    const targetShort = _shortBranch(target.branch);
+
+    if (currentBranch !== targetShort) {
+      details.push(`Switching to branch "${targetShort}" (currently on "${currentBranch}") ...`);
+      await _runGit(['fetch', 'origin'], contentDir);
+      let checkoutResult = await _runGit(['checkout', targetShort], contentDir);
+      if (checkoutResult.code !== 0) {
+        checkoutResult = await _runGit(
+          ['checkout', '-b', targetShort, `origin/${targetShort}`],
+          contentDir
+        );
+      }
+      if (checkoutResult.code !== 0) {
+        const errMsg = `Branch switch failed: ${checkoutResult.stderr || checkoutResult.stdout}`;
+        logger.error(`AdoSync [${target.label}]: ${errMsg}`);
+        details.push(errMsg);
+        return {
+          success: false,
+          message: `Failed to switch to branch "${targetShort}". ${checkoutResult.stderr}`,
+          details: details.join('\n'),
+        };
+      }
+      details.push(`Switched to branch "${targetShort}"`);
+    }
+
     // ── Step 1: Pull latest ──────────────────────────────
     logger.info(`AdoSync [${target.label}]: Pulling latest before push ...`);
-    details.push('--- Pull (before push) ---');
+    details.push('\n--- Pull (before push) ---');
 
     const pullResult = await _runGit(['pull', '--ff-only'], contentDir);
     if (pullResult.code !== 0) {

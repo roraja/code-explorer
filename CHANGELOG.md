@@ -4,6 +4,13 @@ All notable changes to the "Code Explorer" extension will be documented in this 
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-03-30
+
+### Changed
+- **ADO upstream uses same directory**: Content and upstream commands now share `.vscode/code-explorer/` with automatic branch switching instead of separate directories
+- Pull/push commands detect the current branch and switch to the target branch (`content` or `content-upstream`) before operating
+- Removed `--single-branch` from clone so both branches are available locally
+
 ## [0.3.2] - 2026-03-30
 
 ### Added

@@ -4,6 +4,12 @@ All notable changes to the "Code Explorer" extension will be documented in this 
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-03-30
+
+### Added
+- **ADO Upstream sync commands**: "Pull ADO Upstream" and "Push ADO Upstream" for the `content-upstream` branch, syncing to `.vscode/code-explorer-upstream/`
+- Refactored ADO sync into a generic engine supporting multiple sync targets (content + upstream)
+
 ## [0.3.1] - 2026-03-30
 
 ### Fixed

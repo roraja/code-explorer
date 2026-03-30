@@ -14,7 +14,7 @@ import { CacheStore } from './cache/CacheStore';
 import { LLMProviderFactory } from './llm/LLMProviderFactory';
 import { logger, LogLevel } from './utils/logger';
 import { SkillInstaller } from './skills/SkillInstaller';
-import { pullAdoContent, pushAdoContent } from './git/AdoSync';
+import { pullAdoContent, pushAdoContent, pullAdoUpstream, pushAdoUpstream } from './git/AdoSync';
 import { CodeExplorerHoverProvider } from './providers/CodeExplorerHoverProvider';
 import { CodeExplorerCodeLensProvider } from './providers/CodeExplorerCodeLensProvider';
 import { GraphBuilder } from './graph/GraphBuilder';
@@ -449,6 +449,73 @@ export function activate(context: vscode.ExtensionContext): void {
 
             logger.info(`pushAdoContent: ${result.message}`);
             logger.debug(`pushAdoContent details:\n${result.details}`);
+          }
+        );
+      } finally {
+        logger.endCommandLog();
+      }
+    }),
+
+    vscode.commands.registerCommand(COMMANDS.PULL_ADO_UPSTREAM, async () => {
+      logger.startCommandLog('pull-ado-upstream');
+      try {
+        logger.info('Command: pullAdoUpstream invoked');
+
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Code Explorer: Pulling upstream content from ADO...',
+            cancellable: false,
+          },
+          async () => {
+            const result = await pullAdoUpstream(workspaceRoot);
+
+            if (result.success) {
+              vscode.window.showInformationMessage(`Code Explorer: ${result.message}`);
+            } else {
+              vscode.window.showErrorMessage(`Code Explorer: ${result.message}`);
+            }
+
+            logger.info(`pullAdoUpstream: ${result.message}`);
+            logger.debug(`pullAdoUpstream details:\n${result.details}`);
+          }
+        );
+      } finally {
+        logger.endCommandLog();
+      }
+    }),
+
+    vscode.commands.registerCommand(COMMANDS.PUSH_ADO_UPSTREAM, async () => {
+      logger.startCommandLog('push-ado-upstream');
+      try {
+        logger.info('Command: pushAdoUpstream invoked');
+
+        const confirm = await vscode.window.showWarningMessage(
+          'Push upstream content to ADO? This will pull latest changes first, then push.',
+          { modal: true },
+          'Push'
+        );
+        if (confirm !== 'Push') {
+          return;
+        }
+
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Code Explorer: Pushing upstream content to ADO...',
+            cancellable: false,
+          },
+          async () => {
+            const result = await pushAdoUpstream(workspaceRoot);
+
+            if (result.success) {
+              vscode.window.showInformationMessage(`Code Explorer: ${result.message}`);
+            } else {
+              vscode.window.showErrorMessage(`Code Explorer: ${result.message}`);
+            }
+
+            logger.info(`pushAdoUpstream: ${result.message}`);
+            logger.debug(`pushAdoUpstream details:\n${result.details}`);
           }
         );
       } finally {

@@ -23,6 +23,8 @@ export const COMMANDS = {
   INSTALL_GLOBAL_SKILLS: 'codeExplorer.installGlobalSkills',
   PULL_ADO_CONTENT: 'codeExplorer.pullAdoContent',
   PUSH_ADO_CONTENT: 'codeExplorer.pushAdoContent',
+  PULL_ADO_UPSTREAM: 'codeExplorer.pullAdoUpstream',
+  PUSH_ADO_UPSTREAM: 'codeExplorer.pushAdoUpstream',
   SHOW_DEPENDENCY_GRAPH: 'codeExplorer.showDependencyGraph',
   SHOW_SYMBOL_INFO: 'codeExplorer.showSymbolInfo',
 } as const;

@@ -20,6 +20,7 @@ node_modules/
 
 # Code Explorer cache (machine-specific analysis)
 .vscode/code-explorer/
+.vscode/code-explorer-upstream/
 .vscode/code-explorer-logs/
 
 # OS files

@@ -1,28 +1,25 @@
 /**
  * Code Explorer — ADO Content Sync
  *
- * Manages syncing the .vscode/code-explorer cache folder with an
- * Azure DevOps (ADO) git repository. The cache directory IS the git repo:
+ * Manages syncing code-explorer cache folders with an Azure DevOps (ADO)
+ * git repository. Each sync target is a separate cloned repo:
  *
- *   .vscode/code-explorer/          ← cloned ADO repo (origin = ADO)
- *     .git/                         ← its own git history
- *     src/cache/CacheStore.ts/      ← cached analysis files
- *     ...
+ *   .vscode/code-explorer/          ← "content" branch (your analyses)
+ *   .vscode/code-explorer-upstream/ ← "content-upstream" branch (shared/team analyses)
+ *
+ * Both directories are standalone git repos with `origin` set to ADO.
  *
  * ## Pull
  *   - If the directory does not exist: `git clone -b <branch> <url> <dir>`
- *   - If it already exists (already cloned): `git pull --ff-only`
- *   Either way, the result is a full git repo the user can manually
- *   `cd` into and run git commands.
+ *   - If it already exists: `git pull --ff-only`
  *
  * ## Push
- *   1. `git pull --ff-only`  (get latest remote changes)
- *   2. `git add -A`          (stage all local changes)
- *   3. `git commit -m "…"`   (commit — no-op if nothing changed)
- *   4. `git push`            (push to origin)
+ *   1. `git pull --ff-only`
+ *   2. `git add -A`
+ *   3. `git commit -m "…"`
+ *   4. `git push`
  *
  * Remote URL: https://microsoft.visualstudio.com/Edge/_git/edgeinternal.ai
- * Branch:     user/roraja/code-explorer/content
  */
 import * as path from 'path';
 import { existsSync } from 'fs';
@@ -30,10 +27,28 @@ import { spawn } from 'child_process';
 import { logger } from '../utils/logger';
 
 const ADO_REMOTE_URL = 'https://microsoft.visualstudio.com/Edge/_git/edgeinternal.ai';
-const ADO_BRANCH = 'user/roraja/code-explorer/content';
 
-/** Target directory (relative to workspace root) — this IS the cloned repo. */
-const ADO_CONTENT_DIR = '.vscode/code-explorer';
+/** Sync target configuration. */
+interface SyncTarget {
+  /** ADO branch name */
+  branch: string;
+  /** Directory relative to workspace root */
+  dir: string;
+  /** Human-readable label for log/UI messages */
+  label: string;
+}
+
+const CONTENT_TARGET: SyncTarget = {
+  branch: 'user/roraja/code-explorer/content',
+  dir: '.vscode/code-explorer',
+  label: 'ADO Content',
+};
+
+const UPSTREAM_TARGET: SyncTarget = {
+  branch: 'user/roraja/code-explorer/content-upstream',
+  dir: '.vscode/code-explorer-upstream',
+  label: 'ADO Upstream',
+};
 
 export interface AdoSyncResult {
   /** Whether the operation succeeded. */
@@ -89,39 +104,33 @@ function _isGitRepo(contentDir: string): boolean {
   return existsSync(path.join(contentDir, '.git'));
 }
 
+// ── Generic pull / push ──────────────────────────────────
+
 /**
- * Pull content from ADO.
- *
- * - If `.vscode/code-explorer/` does not exist or is not a git repo:
- *   clones the ADO repo into it with `origin` set to the ADO URL.
- * - If it already exists as a git repo: runs `git pull --ff-only`
- *   to fetch and fast-forward.
- *
- * The result is a standalone git repo the user can `cd` into and
- * run manual git commands against.
+ * Pull (clone or fast-forward) a sync target.
  */
-export async function pullAdoContent(workspaceRoot: string): Promise<AdoSyncResult> {
+async function _pull(target: SyncTarget, workspaceRoot: string): Promise<AdoSyncResult> {
   const details: string[] = [];
-  const contentDir = path.join(workspaceRoot, ADO_CONTENT_DIR);
+  const contentDir = path.join(workspaceRoot, target.dir);
 
   try {
     if (!_isGitRepo(contentDir)) {
       // ── Fresh clone ──────────────────────────────────────
       logger.info(
-        `AdoSync: Cloning ${ADO_REMOTE_URL} (branch ${ADO_BRANCH}) into ${ADO_CONTENT_DIR} ...`
+        `AdoSync [${target.label}]: Cloning ${ADO_REMOTE_URL} (branch ${target.branch}) into ${target.dir} ...`
       );
       details.push(`Cloning ${ADO_REMOTE_URL}`);
-      details.push(`  Branch: ${ADO_BRANCH}`);
-      details.push(`  Into:   ${ADO_CONTENT_DIR}`);
+      details.push(`  Branch: ${target.branch}`);
+      details.push(`  Into:   ${target.dir}`);
 
       const cloneResult = await _runGit(
-        ['clone', '--branch', ADO_BRANCH, '--single-branch', ADO_REMOTE_URL, contentDir],
+        ['clone', '--branch', target.branch, '--single-branch', ADO_REMOTE_URL, contentDir],
         workspaceRoot
       );
 
       if (cloneResult.code !== 0) {
         const errMsg = `Clone failed: ${cloneResult.stderr || cloneResult.stdout}`;
-        logger.error(`AdoSync: ${errMsg}`);
+        logger.error(`AdoSync [${target.label}]: ${errMsg}`);
         details.push(errMsg);
         return {
           success: false,
@@ -131,25 +140,27 @@ export async function pullAdoContent(workspaceRoot: string): Promise<AdoSyncResu
       }
 
       details.push('Clone successful');
-      logger.info(`AdoSync: Clone complete — ${ADO_CONTENT_DIR} is now a git repo`);
+      logger.info(`AdoSync [${target.label}]: Clone complete — ${target.dir} is now a git repo`);
 
       return {
         success: true,
-        message: `Cloned ADO repo into ${ADO_CONTENT_DIR}. Origin is set to ADO.`,
+        message: `Cloned ADO repo into ${target.dir}. Origin is set to ADO.`,
         details: details.join('\n'),
       };
     }
 
     // ── Already a git repo — pull latest ─────────────────
-    logger.info(`AdoSync: ${ADO_CONTENT_DIR} is already a git repo — pulling latest ...`);
-    details.push(`${ADO_CONTENT_DIR} already exists as a git repo`);
+    logger.info(
+      `AdoSync [${target.label}]: ${target.dir} is already a git repo — pulling latest ...`
+    );
+    details.push(`${target.dir} already exists as a git repo`);
     details.push('Running git pull ...');
 
     const pullResult = await _runGit(['pull', '--ff-only'], contentDir);
 
     if (pullResult.code !== 0) {
       const errMsg = `Pull failed: ${pullResult.stderr || pullResult.stdout}`;
-      logger.error(`AdoSync: ${errMsg}`);
+      logger.error(`AdoSync [${target.label}]: ${errMsg}`);
       details.push(errMsg);
       return {
         success: false,
@@ -160,16 +171,16 @@ export async function pullAdoContent(workspaceRoot: string): Promise<AdoSyncResu
 
     const pullOutput = pullResult.stdout || pullResult.stderr || 'Already up to date.';
     details.push(pullOutput);
-    logger.info(`AdoSync: Pull complete`);
+    logger.info(`AdoSync [${target.label}]: Pull complete`);
 
     return {
       success: true,
-      message: `Pulled latest changes into ${ADO_CONTENT_DIR}.`,
+      message: `Pulled latest changes into ${target.dir}.`,
       details: details.join('\n'),
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    logger.error(`AdoSync: Pull failed — ${errMsg}`);
+    logger.error(`AdoSync [${target.label}]: Pull failed — ${errMsg}`);
     details.push(`Error: ${errMsg}`);
     return {
       success: false,
@@ -180,40 +191,30 @@ export async function pullAdoContent(workspaceRoot: string): Promise<AdoSyncResu
 }
 
 /**
- * Push content to ADO.
- *
- * The content directory must already be a cloned git repo (run Pull first).
- *
- * Steps:
- *   1. git pull --ff-only   (sync with remote first)
- *   2. git add -A           (stage all changes — new, modified, deleted)
- *   3. git commit            (commit with timestamp message; no-op if clean)
- *   4. git push              (push to origin)
+ * Push a sync target: pull → stage → commit → push.
  */
-export async function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResult> {
+async function _push(target: SyncTarget, workspaceRoot: string): Promise<AdoSyncResult> {
   const details: string[] = [];
-  const contentDir = path.join(workspaceRoot, ADO_CONTENT_DIR);
+  const contentDir = path.join(workspaceRoot, target.dir);
 
   try {
     // Must be an existing git repo
     if (!_isGitRepo(contentDir)) {
       return {
         success: false,
-        message: `${ADO_CONTENT_DIR} is not a git repo. Run "Pull ADO Content" first to clone it.`,
+        message: `${target.dir} is not a git repo. Run "Pull ${target.label}" first to clone it.`,
         details: `No .git directory found in ${contentDir}`,
       };
     }
 
     // ── Step 1: Pull latest ──────────────────────────────
-    logger.info('AdoSync: Pulling latest before push ...');
+    logger.info(`AdoSync [${target.label}]: Pulling latest before push ...`);
     details.push('--- Pull (before push) ---');
 
     const pullResult = await _runGit(['pull', '--ff-only'], contentDir);
     if (pullResult.code !== 0) {
-      // Pull failure is not fatal — there may be local-only changes
-      // on a branch that doesn't exist remotely yet. Log and continue.
       const pullMsg = pullResult.stderr || pullResult.stdout;
-      logger.warn(`AdoSync: Pull before push had issues: ${pullMsg}`);
+      logger.warn(`AdoSync [${target.label}]: Pull before push had issues: ${pullMsg}`);
       details.push(`Pull warning: ${pullMsg}`);
     } else {
       details.push(pullResult.stdout || pullResult.stderr || 'Already up to date.');
@@ -224,7 +225,7 @@ export async function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResu
     const addResult = await _runGit(['add', '-A'], contentDir);
     if (addResult.code !== 0) {
       const errMsg = `git add failed: ${addResult.stderr}`;
-      logger.error(`AdoSync: ${errMsg}`);
+      logger.error(`AdoSync [${target.label}]: ${errMsg}`);
       details.push(errMsg);
       return {
         success: false,
@@ -240,22 +241,21 @@ export async function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResu
     const commitResult = await _runGit(['commit', '-m', commitMsg], contentDir);
 
     if (commitResult.code !== 0) {
-      // Exit code 1 with "nothing to commit" is normal — not an error
       if (
         commitResult.stdout.includes('nothing to commit') ||
         commitResult.stdout.includes('working tree clean')
       ) {
-        logger.info('AdoSync: Nothing to commit — working tree clean');
+        logger.info(`AdoSync [${target.label}]: Nothing to commit — working tree clean`);
         details.push('Nothing to commit, working tree clean');
         return {
           success: true,
-          message: 'No changes to push — cache is already in sync with ADO.',
+          message: `No changes to push — ${target.dir} is already in sync with ADO.`,
           details: details.join('\n'),
         };
       }
 
       const errMsg = `Commit failed: ${commitResult.stderr || commitResult.stdout}`;
-      logger.error(`AdoSync: ${errMsg}`);
+      logger.error(`AdoSync [${target.label}]: ${errMsg}`);
       details.push(errMsg);
       return {
         success: false,
@@ -267,14 +267,14 @@ export async function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResu
 
     // ── Step 4: Push ─────────────────────────────────────
     details.push('\n--- Push ---');
-    logger.info('AdoSync: Pushing to origin ...');
+    logger.info(`AdoSync [${target.label}]: Pushing to origin ...`);
     details.push('Pushing to origin ...');
 
     const pushResult = await _runGit(['push'], contentDir);
 
     if (pushResult.code !== 0) {
       const errMsg = `Push failed: ${pushResult.stderr || pushResult.stdout}`;
-      logger.error(`AdoSync: ${errMsg}`);
+      logger.error(`AdoSync [${target.label}]: ${errMsg}`);
       details.push(errMsg);
       return {
         success: false,
@@ -285,16 +285,16 @@ export async function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResu
 
     const pushOutput = pushResult.stderr || pushResult.stdout || 'Done';
     details.push(pushOutput);
-    logger.info('AdoSync: Push complete');
+    logger.info(`AdoSync [${target.label}]: Push complete`);
 
     return {
       success: true,
-      message: 'Committed and pushed cache changes to ADO.',
+      message: `Committed and pushed changes to ADO (${target.dir}).`,
       details: details.join('\n'),
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    logger.error(`AdoSync: Push failed — ${errMsg}`);
+    logger.error(`AdoSync [${target.label}]: Push failed — ${errMsg}`);
     details.push(`Error: ${errMsg}`);
     return {
       success: false,
@@ -302,4 +302,26 @@ export async function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResu
       details: details.join('\n'),
     };
   }
+}
+
+// ── Public API ───────────────────────────────────────────
+
+/** Pull content from ADO → .vscode/code-explorer/ */
+export function pullAdoContent(workspaceRoot: string): Promise<AdoSyncResult> {
+  return _pull(CONTENT_TARGET, workspaceRoot);
+}
+
+/** Push content from .vscode/code-explorer/ → ADO */
+export function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResult> {
+  return _push(CONTENT_TARGET, workspaceRoot);
+}
+
+/** Pull upstream content from ADO → .vscode/code-explorer-upstream/ */
+export function pullAdoUpstream(workspaceRoot: string): Promise<AdoSyncResult> {
+  return _pull(UPSTREAM_TARGET, workspaceRoot);
+}
+
+/** Push upstream content from .vscode/code-explorer-upstream/ → ADO */
+export function pushAdoUpstream(workspaceRoot: string): Promise<AdoSyncResult> {
+  return _push(UPSTREAM_TARGET, workspaceRoot);
 }

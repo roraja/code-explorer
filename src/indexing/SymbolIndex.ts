@@ -278,7 +278,7 @@ export class SymbolIndex {
       if (scopeDiff !== 0) {
         return scopeDiff;
       }
-      return (a.endLine - a.startLine) - (b.endLine - b.startLine);
+      return a.endLine - a.startLine - (b.endLine - b.startLine);
     });
 
     return containing[0];
@@ -298,12 +298,7 @@ export class SymbolIndex {
    * Persist the index to disk as JSON.
    */
   async save(): Promise<void> {
-    const indexPath = path.join(
-      this._workspaceRoot,
-      '.vscode',
-      CACHE.DIR_NAME,
-      SYMBOL_INDEX_FILE
-    );
+    const indexPath = path.join(this._workspaceRoot, '.vscode', CACHE.DIR_NAME, SYMBOL_INDEX_FILE);
 
     const serialized: SerializedIndex = {
       version: SYMBOL_INDEX_VERSION,
@@ -345,12 +340,7 @@ export class SymbolIndex {
    * Returns false if the index file doesn't exist or is corrupt.
    */
   async load(): Promise<boolean> {
-    const indexPath = path.join(
-      this._workspaceRoot,
-      '.vscode',
-      CACHE.DIR_NAME,
-      SYMBOL_INDEX_FILE
-    );
+    const indexPath = path.join(this._workspaceRoot, '.vscode', CACHE.DIR_NAME, SYMBOL_INDEX_FILE);
 
     try {
       const content = await fs.readFile(indexPath, 'utf8');
@@ -376,9 +366,7 @@ export class SymbolIndex {
         this.addFileEntries(filePath, entries, fileEntry.hash);
       }
 
-      logger.info(
-        `SymbolIndex: loaded ${this._byAddress.size} symbols from ${indexPath}`
-      );
+      logger.info(`SymbolIndex: loaded ${this._byAddress.size} symbols from ${indexPath}`);
       return true;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {

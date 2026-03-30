@@ -121,12 +121,18 @@ function init(): void {
   });
 
   // Restore persisted state if available (avoids flash of empty on re-show)
-  const saved = vscode.getState() as { tabs: Tab[]; activeTabId: string | null; navigationHistory?: NavigationHistoryState } | null;
+  const saved = vscode.getState() as {
+    tabs: Tab[];
+    activeTabId: string | null;
+    navigationHistory?: NavigationHistoryState;
+  } | null;
   if (saved && saved.tabs) {
     currentTabs = saved.tabs;
     currentActiveTabId = saved.activeTabId;
     currentNavHistory = saved.navigationHistory || null;
-    log(`restored saved state: ${currentTabs.length} tabs, history=${currentNavHistory?.entries.length ?? 0} entries`);
+    log(
+      `restored saved state: ${currentTabs.length} tabs, history=${currentNavHistory?.entries.length ?? 0} entries`
+    );
   }
 
   render();
@@ -137,9 +143,15 @@ function init(): void {
       currentTabs = msg.tabs || [];
       currentActiveTabId = msg.activeTabId;
       currentNavHistory = msg.navigationHistory || null;
-      log(`setState: ${currentTabs.length} tabs, active=${currentActiveTabId}, history=${currentNavHistory?.entries.length ?? 0} entries`);
+      log(
+        `setState: ${currentTabs.length} tabs, active=${currentActiveTabId}, history=${currentNavHistory?.entries.length ?? 0} entries`
+      );
       // Persist for webview re-creation
-      vscode.setState({ tabs: currentTabs, activeTabId: currentActiveTabId, navigationHistory: currentNavHistory });
+      vscode.setState({
+        tabs: currentTabs,
+        activeTabId: currentActiveTabId,
+        navigationHistory: currentNavHistory,
+      });
       // If a graph is showing and tabs come in, keep showing tabs
       if (_showingGraph) {
         _showingGraph = false;
@@ -274,16 +286,19 @@ function renderBreadcrumbBar(): string {
       return `<span class="breadcrumb-item${activeClass}" data-tab-id="${entry.toTabId}" title="${esc(entry.symbolName)} (${esc(entry.trigger)})"><span class="breadcrumb-item__icon">${icon}</span><span class="breadcrumb-item__name">${esc(entry.symbolName)}</span></span>${i < trail.length - 1 ? '<span class="breadcrumb-separator">\u203A</span>' : ''}`;
     })
     .join('');
-  const pinBtn = trail.length > 1
-    ? '<button class="breadcrumb-nav__btn breadcrumb-nav__pin" id="pin-investigation" title="Pin this investigation trail">\uD83D\uDCCC</button>'
-    : '';
-  const investigationsList = pinnedInvestigations.length > 0
-    ? _renderPinnedInvestigations(pinnedInvestigations)
-    : '';
+  const pinBtn =
+    trail.length > 1
+      ? '<button class="breadcrumb-nav__btn breadcrumb-nav__pin" id="pin-investigation" title="Pin this investigation trail">\uD83D\uDCCC</button>'
+      : '';
+  const investigationsList =
+    pinnedInvestigations.length > 0 ? _renderPinnedInvestigations(pinnedInvestigations) : '';
   return `<div class="breadcrumb-bar"><div class="breadcrumb-nav">${backBtn}${forwardBtn}<div class="breadcrumb-trail">${crumbs}</div>${pinBtn}</div>${investigationsList}</div>`;
 }
 
-function _buildBreadcrumbTrail(entries: NavigationEntry[], currentIndex: number): NavigationEntry[] {
+function _buildBreadcrumbTrail(
+  entries: NavigationEntry[],
+  currentIndex: number
+): NavigationEntry[] {
   const trail: NavigationEntry[] = [];
   const seen = new Set<string>();
   for (let i = 0; i <= currentIndex && i < entries.length; i++) {
@@ -1736,9 +1751,10 @@ function _renderGraphView(): string {
       <span class="graph-view__legend-item">\u21E2 depends</span>
     </div>
     <div class="graph-view__body" id="graph-viewport">
-      ${_graphNodeCount === 0
-        ? '<div class="graph-view__empty">No cached analyses found.<br>Use <kbd>Ctrl+Shift+H</kbd> to analyze symbols first.</div>'
-        : `<div class="graph-view__svg-wrapper" id="graph-svg-wrapper">
+      ${
+        _graphNodeCount === 0
+          ? '<div class="graph-view__empty">No cached analyses found.<br>Use <kbd>Ctrl+Shift+H</kbd> to analyze symbols first.</div>'
+          : `<div class="graph-view__svg-wrapper" id="graph-svg-wrapper">
             <div class="diagram-container graph-view__diagram" id="${graphId}" data-mermaid-source="${escAttr(_graphMermaidSource)}">
               <div class="diagram-loading">Rendering graph\u2026</div>
             </div>
@@ -1802,11 +1818,15 @@ function _attachGraphListeners(): void {
   // Mouse wheel zoom on the viewport
   const viewport = document.getElementById('graph-viewport');
   if (viewport) {
-    viewport.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const factor = e.deltaY > 0 ? 0.9 : 1.1;
-      _graphZoom(factor);
-    }, { passive: false });
+    viewport.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        const factor = e.deltaY > 0 ? 0.9 : 1.1;
+        _graphZoom(factor);
+      },
+      { passive: false }
+    );
 
     // Mouse drag to pan
     viewport.addEventListener('mousedown', (e) => {

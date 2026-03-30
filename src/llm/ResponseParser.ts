@@ -1142,9 +1142,7 @@ export class ResponseParser {
       lastIndex = match.index + match[0].length;
     }
     if (lastKey !== null) {
-      sections[lastKey] = this._stripJsonFencedBlocks(
-        markdown.substring(lastIndex).trim()
-      );
+      sections[lastKey] = this._stripJsonFencedBlocks(markdown.substring(lastIndex).trim());
     }
 
     return sections;

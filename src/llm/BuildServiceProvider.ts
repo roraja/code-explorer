@@ -316,10 +316,9 @@ export class BuildServiceProvider implements LLMProvider {
     while (Date.now() < deadline) {
       // Poll incremental logs
       try {
-        const logsResp = await this._httpGet<JobLogs>(
-          `/api/v1/jobs/${jobId}/logs`,
-          { since_offset: String(logOffset) }
-        );
+        const logsResp = await this._httpGet<JobLogs>(`/api/v1/jobs/${jobId}/logs`, {
+          since_offset: String(logOffset),
+        });
 
         if (logsResp.log) {
           logOffset = logsResp.offset;

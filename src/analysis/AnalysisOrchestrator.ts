@@ -376,7 +376,11 @@ export class AnalysisOrchestrator {
       // Try address-based cache lookup (O(1), no directory scanning)
       logger.logLLMStep(`TIER 1 CACHE: trying address-based lookup "${address}"...`);
       const cachedByAddress = await this._cache.readByAddress(address, staticSymbol);
-      if (cachedByAddress && !cachedByAddress.metadata.stale && cachedByAddress.metadata.llmProvider) {
+      if (
+        cachedByAddress &&
+        !cachedByAddress.metadata.stale &&
+        cachedByAddress.metadata.llmProvider
+      ) {
         const elapsed = Date.now() - startTime;
         logger.logLLMStep(
           `TIER 1 CACHE HIT — found cached analysis via address "${address}". ` +
@@ -446,7 +450,11 @@ export class AnalysisOrchestrator {
         };
 
         const cachedByAddress = await this._cache.readByAddress(indexEntry.address, indexSymbol);
-        if (cachedByAddress && !cachedByAddress.metadata.stale && cachedByAddress.metadata.llmProvider) {
+        if (
+          cachedByAddress &&
+          !cachedByAddress.metadata.stale &&
+          cachedByAddress.metadata.llmProvider
+        ) {
           const elapsed = Date.now() - startTime;
           logger.logLLMStep(
             `TIER 2 CACHE HIT — address "${indexEntry.address}" resolved in ${elapsed}ms.`
@@ -498,7 +506,9 @@ export class AnalysisOrchestrator {
             try {
               await this._cache.promoteToAddress(missedAddr, cached.symbol);
             } catch (promoteErr) {
-              logger.debug(`Orchestrator: promoteToAddress failed for "${missedAddr}": ${promoteErr}`);
+              logger.debug(
+                `Orchestrator: promoteToAddress failed for "${missedAddr}": ${promoteErr}`
+              );
             }
           }
         }
@@ -897,9 +907,7 @@ export class AnalysisOrchestrator {
         this._cache.cacheRoot
       );
     } else {
-      logger.logLLMStep(
-        'No symbols from language server — falling back to full-source prompt...'
-      );
+      logger.logLLMStep('No symbols from language server — falling back to full-source prompt...');
       prompt = PromptBuilder.buildFileAnalysis(filePath, fileSource, this._cache.cacheRoot);
     }
     logger.logLLMStep(`File analysis prompt built (${prompt.length} chars)`);

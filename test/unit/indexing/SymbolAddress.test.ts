@@ -41,12 +41,7 @@ suite('SymbolAddress', () => {
     });
 
     test('builds address for method inside class', () => {
-      const addr = buildAddress(
-        'src/cache/CacheStore.ts',
-        ['CacheStore'],
-        'method',
-        'write'
-      );
+      const addr = buildAddress('src/cache/CacheStore.ts', ['CacheStore'], 'method', 'write');
       assert.strictEqual(addr, 'src/cache/CacheStore.ts#CacheStore::method.write');
     });
 
@@ -61,37 +56,18 @@ suite('SymbolAddress', () => {
     });
 
     test('builds address for interface', () => {
-      const addr = buildAddress(
-        'src/models/types.ts',
-        [],
-        'interface',
-        'SymbolInfo'
-      );
+      const addr = buildAddress('src/models/types.ts', [], 'interface', 'SymbolInfo');
       assert.strictEqual(addr, 'src/models/types.ts#interface.SymbolInfo');
     });
 
     test('builds address for enum', () => {
-      const addr = buildAddress(
-        'src/models/errors.ts',
-        [],
-        'enum',
-        'ErrorCode'
-      );
+      const addr = buildAddress('src/models/errors.ts', [], 'enum', 'ErrorCode');
       assert.strictEqual(addr, 'src/models/errors.ts#enum.ErrorCode');
     });
 
     test('builds address with overload discriminator', () => {
-      const addr = buildAddress(
-        'include/Logger.h',
-        ['app', 'Logger'],
-        'method',
-        'log',
-        'a3f2'
-      );
-      assert.strictEqual(
-        addr,
-        'include/Logger.h#app::Logger::method.log~a3f2'
-      );
+      const addr = buildAddress('include/Logger.h', ['app', 'Logger'], 'method', 'log', 'a3f2');
+      assert.strictEqual(addr, 'include/Logger.h#app::Logger::method.log~a3f2');
     });
 
     test('builds address for unknown kind', () => {
@@ -106,10 +82,7 @@ suite('SymbolAddress', () => {
         'variable',
         'nextId'
       );
-      assert.strictEqual(
-        addr,
-        'src/main.cpp#app::UserService::createUser::var.nextId'
-      );
+      assert.strictEqual(addr, 'src/main.cpp#app::UserService::createUser::var.nextId');
     });
   });
 
@@ -124,9 +97,7 @@ suite('SymbolAddress', () => {
     });
 
     test('parses scoped function address', () => {
-      const parsed = parseAddress(
-        'src/UserService.cpp#app::UserService::fn.createUser'
-      );
+      const parsed = parseAddress('src/UserService.cpp#app::UserService::fn.createUser');
       assert.strictEqual(parsed.filePath, 'src/UserService.cpp');
       assert.deepStrictEqual(parsed.scopeChain, ['app', 'UserService']);
       assert.strictEqual(parsed.kind, 'function');
@@ -134,9 +105,7 @@ suite('SymbolAddress', () => {
     });
 
     test('parses address with overload discriminator', () => {
-      const parsed = parseAddress(
-        'include/Logger.h#app::Logger::method.log~a3f2'
-      );
+      const parsed = parseAddress('include/Logger.h#app::Logger::method.log~a3f2');
       assert.strictEqual(parsed.filePath, 'include/Logger.h');
       assert.deepStrictEqual(parsed.scopeChain, ['app', 'Logger']);
       assert.strictEqual(parsed.kind, 'method');
@@ -187,13 +156,7 @@ suite('SymbolAddress', () => {
     });
 
     test('round-trips with overload discriminator', () => {
-      const original = buildAddress(
-        'include/Logger.h',
-        ['app', 'Logger'],
-        'method',
-        'log',
-        'a3f2'
-      );
+      const original = buildAddress('include/Logger.h', ['app', 'Logger'], 'method', 'log', 'a3f2');
       const parsed = parseAddress(original);
       const rebuilt = buildAddress(
         parsed.filePath,
@@ -233,9 +196,7 @@ suite('SymbolAddress', () => {
 
     test('is deterministic', () => {
       // Running many times should give the same result
-      const results = Array.from({ length: 10 }, () =>
-        computeDiscriminator('int,const char*,...')
-      );
+      const results = Array.from({ length: 10 }, () => computeDiscriminator('int,const char*,...'));
       assert.ok(results.every((r) => r === results[0]));
     });
   });
@@ -250,31 +211,22 @@ suite('SymbolAddress', () => {
     });
 
     test('derives cache path for scoped function', () => {
-      const p = addressToCachePath(
-        'src/UserService.cpp#app::fn.UserService::createUser'
-      );
+      const p = addressToCachePath('src/UserService.cpp#app::fn.UserService::createUser');
       assert.ok(p.endsWith('app.fn.UserService.createUser.md'));
     });
 
     test('derives cache path for overloaded method', () => {
-      const p = addressToCachePath(
-        'include/Logger.h#app::Logger::method.log~a3f2'
-      );
+      const p = addressToCachePath('include/Logger.h#app::Logger::method.log~a3f2');
       assert.ok(p.endsWith('app.Logger.method.log~a3f2.md'));
     });
 
     test('derives cache path for class', () => {
-      const p = addressToCachePath(
-        'src/cache/CacheStore.ts#class.CacheStore'
-      );
+      const p = addressToCachePath('src/cache/CacheStore.ts#class.CacheStore');
       assert.ok(p.endsWith('class.CacheStore.md'));
     });
 
     test('throws on invalid address', () => {
-      assert.throws(
-        () => addressToCachePath('nohash'),
-        /missing #/
-      );
+      assert.throws(() => addressToCachePath('nohash'), /missing #/);
     });
   });
 });

@@ -181,9 +181,7 @@ export function runCLI(options: CLIRunOptions): Promise<string> {
         clearTimeout(timer);
         clearInterval(waitingInterval);
         const elapsedMs = Date.now() - startTime;
-        logger.error(
-          `${label}: spawn error after ${elapsedMs}ms (PID=${pid}): ${err.message}`
-        );
+        logger.error(`${label}: spawn error after ${elapsedMs}ms (PID=${pid}): ${err.message}`);
         reject(err);
       }
     });

@@ -72,11 +72,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
    * Push a dependency graph to the webview for rendering.
    * Called by the "Show Dependency Graph" command.
    */
-  public showDependencyGraph(
-    mermaidSource: string,
-    nodeCount: number,
-    edgeCount: number
-  ): void {
+  public showDependencyGraph(mermaidSource: string, nodeCount: number, edgeCount: number): void {
     if (!this._view || !this._webviewReady) {
       logger.warn('ViewProvider.showDependencyGraph: webview not ready');
       return;
@@ -409,9 +405,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    logger.info(
-      `ViewProvider._restoreSession: restoring ${session.tabs.length} tabs from session`
-    );
+    logger.info(`ViewProvider._restoreSession: restoring ${session.tabs.length} tabs from session`);
 
     // Restore tabs asynchronously — read cache for each persisted tab
     this._restoreTabsAsync(session).catch((err) => {
@@ -423,9 +417,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
    * Asynchronously restore tabs by reading their cached analysis.
    * Tabs are restored in order. Tabs without cached data are skipped.
    */
-  private async _restoreTabsAsync(
-    session: import('./TabSessionStore').TabSession
-  ): Promise<void> {
+  private async _restoreTabsAsync(session: import('./TabSessionStore').TabSession): Promise<void> {
     if (!this._cacheStore) {
       return;
     }
@@ -465,9 +457,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
 
     if (restoredCount > 0) {
       // Restore active tab ID (mapped to new ID), or default to last tab
-      const mappedActiveId = session.activeTabId
-        ? idMap.get(session.activeTabId) ?? null
-        : null;
+      const mappedActiveId = session.activeTabId ? (idMap.get(session.activeTabId) ?? null) : null;
       this._activeTabId =
         mappedActiveId ?? (this._tabs.length > 0 ? this._tabs[this._tabs.length - 1].id : null);
 
@@ -476,7 +466,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         this._navigationHistory = session.navigationHistory
           .map((entry) => ({
             ...entry,
-            fromTabId: entry.fromTabId ? idMap.get(entry.fromTabId) ?? entry.fromTabId : null,
+            fromTabId: entry.fromTabId ? (idMap.get(entry.fromTabId) ?? entry.fromTabId) : null,
             toTabId: idMap.get(entry.toTabId) ?? entry.toTabId,
           }))
           // Only keep entries where the toTabId maps to a restored tab
@@ -593,9 +583,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       }
 
       case 'navigateToSymbol': {
-        logger.info(
-          `ViewProvider: navigateToSymbol "${message.symbolName}"`
-        );
+        logger.info(`ViewProvider: navigateToSymbol "${message.symbolName}"`);
         this._navigateToSymbolByName(message.symbolName);
         break;
       }
@@ -763,8 +751,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       doc.lineAt(endLine).text.length
     );
     const surroundingSource = doc.getText(surroundingRange);
-    const cursorLine =
-      targetLine < doc.lineCount ? doc.lineAt(targetLine).text : '';
+    const cursorLine = targetLine < doc.lineCount ? doc.lineAt(targetLine).text : '';
 
     return {
       word,
@@ -774,7 +761,6 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       cursorLine,
     };
   }
-
 
   private async _navigateToSource(
     filePath: string,
@@ -1114,10 +1100,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async _handleRequestSymbolGraph(
-    symbolName: string,
-    filePath: string
-  ): Promise<void> {
+  private async _handleRequestSymbolGraph(symbolName: string, filePath: string): Promise<void> {
     if (!this._graphBuilder) {
       logger.warn('ViewProvider._handleRequestSymbolGraph: no graph builder');
       return;

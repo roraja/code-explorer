@@ -16,10 +16,7 @@ export class CppExtractor extends BaseExtractor {
   /**
    * Walk the C++ AST and extract all symbol definitions.
    */
-  protected extractRaw(
-    rootNode: Parser.SyntaxNode,
-    _filePath: string
-  ): RawExtractedSymbol[] {
+  protected extractRaw(rootNode: Parser.SyntaxNode, _filePath: string): RawExtractedSymbol[] {
     return this._walkNode(rootNode, [], false);
   }
 
@@ -222,7 +219,9 @@ export class CppExtractor extends BaseExtractor {
 
     // Determine kind: if inside a class scope, it's a method
     // Also check for qualified names like ClassName::methodName
-    const kind: SymbolKindType = isInsideFunction ? 'function' : this._inferFunctionKind(name, scopeChain);
+    const kind: SymbolKindType = isInsideFunction
+      ? 'function'
+      : this._inferFunctionKind(name, scopeChain);
     const paramSig = this.extractParamSignature(node);
 
     symbols.push({
@@ -297,16 +296,18 @@ export class CppExtractor extends BaseExtractor {
       return [];
     }
 
-    return [{
-      name: nameNode.text,
-      kind: 'enum',
-      startLine: node.startPosition.row,
-      endLine: node.endPosition.row,
-      startColumn: node.startPosition.column,
-      scopeChain: [...scopeChain],
-      paramSignature: null,
-      isLocal: isInsideFunction,
-    }];
+    return [
+      {
+        name: nameNode.text,
+        kind: 'enum',
+        startLine: node.startPosition.row,
+        endLine: node.endPosition.row,
+        startColumn: node.startPosition.column,
+        scopeChain: [...scopeChain],
+        paramSignature: null,
+        isLocal: isInsideFunction,
+      },
+    ];
   }
 
   /**

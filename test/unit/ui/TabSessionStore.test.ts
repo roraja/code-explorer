@@ -106,12 +106,7 @@ suite('TabSessionStore', () => {
   });
 
   test('load returns null for invalid JSON', () => {
-    const filePath = path.join(
-      tmpDir,
-      '.vscode',
-      'code-explorer-logs',
-      'tab-session.json'
-    );
+    const filePath = path.join(tmpDir, '.vscode', 'code-explorer-logs', 'tab-session.json');
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, 'not valid json {{{', 'utf-8');
 
@@ -120,12 +115,7 @@ suite('TabSessionStore', () => {
   });
 
   test('load returns null for wrong version', () => {
-    const filePath = path.join(
-      tmpDir,
-      '.vscode',
-      'code-explorer-logs',
-      'tab-session.json'
-    );
+    const filePath = path.join(tmpDir, '.vscode', 'code-explorer-logs', 'tab-session.json');
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     const badSession = {
       version: 99,
@@ -140,19 +130,17 @@ suite('TabSessionStore', () => {
   });
 
   test('load filters out tabs with missing required fields', () => {
-    const filePath = path.join(
-      tmpDir,
-      '.vscode',
-      'code-explorer-logs',
-      'tab-session.json'
-    );
+    const filePath = path.join(tmpDir, '.vscode', 'code-explorer-logs', 'tab-session.json');
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     const session: TabSession = {
       version: 1,
       savedAt: new Date().toISOString(),
       tabs: [
         makeTab('tab-1', makeSymbol('valid')),
-        { id: 'tab-2', symbol: { name: '', kind: 'function', filePath: '', position: { line: 0, character: 0 } } },
+        {
+          id: 'tab-2',
+          symbol: { name: '', kind: 'function', filePath: '', position: { line: 0, character: 0 } },
+        },
         { id: 'tab-3', symbol: {} as SymbolInfo }, // missing fields
       ],
       activeTabId: 'tab-1',

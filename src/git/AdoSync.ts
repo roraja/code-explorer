@@ -153,10 +153,7 @@ export async function pullAdoContent(workspaceRoot: string): Promise<AdoSyncResu
     logger.info(`AdoSync: Fetching ${ADO_REMOTE_NAME}/${ADO_BRANCH} ...`);
     details.push(`Fetching ${ADO_REMOTE_NAME} ${ADO_BRANCH} ...`);
 
-    const fetchResult = await _runGit(
-      ['fetch', ADO_REMOTE_NAME, ADO_BRANCH],
-      workspaceRoot
-    );
+    const fetchResult = await _runGit(['fetch', ADO_REMOTE_NAME, ADO_BRANCH], workspaceRoot);
     if (fetchResult.code !== 0) {
       const errMsg = `Fetch failed: ${fetchResult.stderr}`;
       logger.error(`AdoSync: ${errMsg}`);
@@ -271,10 +268,7 @@ export async function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResu
     logger.info('AdoSync: Fetching latest before push ...');
     details.push('--- Fetch (before push) ---');
 
-    const fetchResult = await _runGit(
-      ['fetch', ADO_REMOTE_NAME, ADO_BRANCH],
-      workspaceRoot
-    );
+    const fetchResult = await _runGit(['fetch', ADO_REMOTE_NAME, ADO_BRANCH], workspaceRoot);
     if (fetchResult.code !== 0) {
       const errMsg = `Fetch failed: ${fetchResult.stderr}`;
       logger.error(`AdoSync: ${errMsg}`);
@@ -293,11 +287,7 @@ export async function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResu
     const envOverride = { GIT_INDEX_FILE: tmpIndex, GIT_WORK_TREE: contentDir };
 
     // Add all files from content dir to temp index
-    const addResult = await _runGitEnv(
-      ['add', '-A'],
-      workspaceRoot,
-      envOverride
-    );
+    const addResult = await _runGitEnv(['add', '-A'], workspaceRoot, envOverride);
     if (addResult.code !== 0) {
       const errMsg = `Index add failed: ${addResult.stderr}`;
       logger.error(`AdoSync: ${errMsg}`);
@@ -310,11 +300,7 @@ export async function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResu
     }
 
     // Write the tree
-    const writeTreeResult = await _runGitEnv(
-      ['write-tree'],
-      workspaceRoot,
-      envOverride
-    );
+    const writeTreeResult = await _runGitEnv(['write-tree'], workspaceRoot, envOverride);
     if (writeTreeResult.code !== 0) {
       const errMsg = `write-tree failed: ${writeTreeResult.stderr}`;
       logger.error(`AdoSync: ${errMsg}`);
@@ -368,9 +354,7 @@ export async function pushAdoContent(workspaceRoot: string): Promise<AdoSyncResu
     logger.info(
       `AdoSync: Pushing ${commitHash} to ${ADO_REMOTE_NAME}:refs/heads/${ADO_BRANCH} ...`
     );
-    details.push(
-      `Pushing to ${ADO_REMOTE_NAME}:refs/heads/${ADO_BRANCH} ...`
-    );
+    details.push(`Pushing to ${ADO_REMOTE_NAME}:refs/heads/${ADO_BRANCH} ...`);
 
     const pushResult = await _runGit(
       ['push', ADO_REMOTE_NAME, `${commitHash}:refs/heads/${ADO_BRANCH}`],

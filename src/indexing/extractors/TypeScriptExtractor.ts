@@ -17,10 +17,7 @@ export class TypeScriptExtractor extends BaseExtractor {
   /**
    * Walk the TypeScript AST and extract all symbol definitions.
    */
-  protected extractRaw(
-    rootNode: Parser.SyntaxNode,
-    _filePath: string
-  ): RawExtractedSymbol[] {
+  protected extractRaw(rootNode: Parser.SyntaxNode, _filePath: string): RawExtractedSymbol[] {
     return this._walkNode(rootNode, [], false);
   }
 
@@ -40,10 +37,7 @@ export class TypeScriptExtractor extends BaseExtractor {
         continue;
       }
 
-      if (
-        child.type === 'required_parameter' ||
-        child.type === 'optional_parameter'
-      ) {
+      if (child.type === 'required_parameter' || child.type === 'optional_parameter') {
         const typeAnnotation = child.childForFieldName('type');
         if (typeAnnotation) {
           // type annotation is a type_annotation node whose child is the actual type
@@ -116,9 +110,7 @@ export class TypeScriptExtractor extends BaseExtractor {
 
         case 'lexical_declaration':
         case 'variable_declaration':
-          symbols.push(
-            ...this._handleVariableDeclaration(child, scopeChain, isInsideFunction)
-          );
+          symbols.push(...this._handleVariableDeclaration(child, scopeChain, isInsideFunction));
           break;
 
         case 'export_statement':
@@ -236,16 +228,18 @@ export class TypeScriptExtractor extends BaseExtractor {
       return [];
     }
 
-    return [{
-      name: nameNode.text,
-      kind: 'interface',
-      startLine: node.startPosition.row,
-      endLine: node.endPosition.row,
-      startColumn: node.startPosition.column,
-      scopeChain: [...scopeChain],
-      paramSignature: null,
-      isLocal: isInsideFunction,
-    }];
+    return [
+      {
+        name: nameNode.text,
+        kind: 'interface',
+        startLine: node.startPosition.row,
+        endLine: node.endPosition.row,
+        startColumn: node.startPosition.column,
+        scopeChain: [...scopeChain],
+        paramSignature: null,
+        isLocal: isInsideFunction,
+      },
+    ];
   }
 
   /**
@@ -261,16 +255,18 @@ export class TypeScriptExtractor extends BaseExtractor {
       return [];
     }
 
-    return [{
-      name: nameNode.text,
-      kind: 'type',
-      startLine: node.startPosition.row,
-      endLine: node.endPosition.row,
-      startColumn: node.startPosition.column,
-      scopeChain: [...scopeChain],
-      paramSignature: null,
-      isLocal: isInsideFunction,
-    }];
+    return [
+      {
+        name: nameNode.text,
+        kind: 'type',
+        startLine: node.startPosition.row,
+        endLine: node.endPosition.row,
+        startColumn: node.startPosition.column,
+        scopeChain: [...scopeChain],
+        paramSignature: null,
+        isLocal: isInsideFunction,
+      },
+    ];
   }
 
   /**
@@ -286,16 +282,18 @@ export class TypeScriptExtractor extends BaseExtractor {
       return [];
     }
 
-    return [{
-      name: nameNode.text,
-      kind: 'enum',
-      startLine: node.startPosition.row,
-      endLine: node.endPosition.row,
-      startColumn: node.startPosition.column,
-      scopeChain: [...scopeChain],
-      paramSignature: null,
-      isLocal: isInsideFunction,
-    }];
+    return [
+      {
+        name: nameNode.text,
+        kind: 'enum',
+        startLine: node.startPosition.row,
+        endLine: node.endPosition.row,
+        startColumn: node.startPosition.column,
+        scopeChain: [...scopeChain],
+        paramSignature: null,
+        isLocal: isInsideFunction,
+      },
+    ];
   }
 
   /**
@@ -367,16 +365,18 @@ export class TypeScriptExtractor extends BaseExtractor {
       return [];
     }
 
-    return [{
-      name: nameNode.text,
-      kind: 'property',
-      startLine: node.startPosition.row,
-      endLine: node.endPosition.row,
-      startColumn: node.startPosition.column,
-      scopeChain: [...scopeChain],
-      paramSignature: null,
-      isLocal: false,
-    }];
+    return [
+      {
+        name: nameNode.text,
+        kind: 'property',
+        startLine: node.startPosition.row,
+        endLine: node.endPosition.row,
+        startColumn: node.startPosition.column,
+        scopeChain: [...scopeChain],
+        paramSignature: null,
+        isLocal: false,
+      },
+    ];
   }
 
   /**
@@ -413,9 +413,7 @@ export class TypeScriptExtractor extends BaseExtractor {
             // Recurse into function body
             const body = value.childForFieldName('body');
             if (body) {
-              symbols.push(
-                ...this._walkNode(body, [...scopeChain, nameNode.text], true)
-              );
+              symbols.push(...this._walkNode(body, [...scopeChain, nameNode.text], true));
             }
           } else {
             symbols.push({

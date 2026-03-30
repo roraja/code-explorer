@@ -451,10 +451,7 @@ suite('BuildServiceProvider', () => {
       );
 
       // Should include Write tool instruction
-      assert.ok(
-        promptContent.includes('Write tool'),
-        'prompt should mention the Write tool'
-      );
+      assert.ok(promptContent.includes('Write tool'), 'prompt should mention the Write tool');
 
       // Should include system prompt with file-writing instruction
       assert.ok(
@@ -675,16 +672,10 @@ suite('BuildServiceProvider', () => {
       );
 
       // Should include the "CRITICAL" framing
-      assert.ok(
-        content.includes('CRITICAL'),
-        'should include CRITICAL output instruction header'
-      );
+      assert.ok(content.includes('CRITICAL'), 'should include CRITICAL output instruction header');
 
       // Should mention the Write tool explicitly
-      assert.ok(
-        content.includes('Write tool'),
-        'should instruct agent to use Write tool'
-      );
+      assert.ok(content.includes('Write tool'), 'should instruct agent to use Write tool');
     });
   });
 
@@ -831,9 +822,7 @@ suite('BuildServiceProvider', () => {
       assert.strictEqual(result, 'Final result');
 
       // Should have hit logs endpoint at least once
-      const logsReqs = mock.requests.filter(
-        (r) => r.method === 'GET' && r.path?.includes('/logs')
-      );
+      const logsReqs = mock.requests.filter((r) => r.method === 'GET' && r.path?.includes('/logs'));
       assert.ok(logsReqs.length >= 1, 'should poll logs at least once');
 
       // Should have hit status endpoint for final result

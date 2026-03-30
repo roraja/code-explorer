@@ -6,7 +6,13 @@
  */
 import * as vscode from 'vscode';
 import * as path from 'path';
-import type { SymbolInfo, SymbolKindType, UsageEntry, CallStackEntry, RelationshipEntry } from '../models/types';
+import type {
+  SymbolInfo,
+  SymbolKindType,
+  UsageEntry,
+  CallStackEntry,
+  RelationshipEntry,
+} from '../models/types';
 import { logger } from '../utils/logger';
 import {
   findDeepestSymbol,
@@ -72,7 +78,11 @@ export class StaticAnalyzer {
       // If inside the body (not on the name), try definition provider for the specific token
       if (!match.symbol.selectionRange.contains(position)) {
         const tokenResult = await this._resolveViaDefinitionProvider(
-          uri, position, word, filePath, docSymbols
+          uri,
+          position,
+          word,
+          filePath,
+          docSymbols
         );
         if (tokenResult) {
           return tokenResult;
@@ -102,9 +112,7 @@ export class StaticAnalyzer {
           },
         },
         containerName:
-          match.ancestors.length > 0
-            ? match.ancestors[match.ancestors.length - 1].name
-            : undefined,
+          match.ancestors.length > 0 ? match.ancestors[match.ancestors.length - 1].name : undefined,
         scopeChain,
       };
 
@@ -535,9 +543,7 @@ export class StaticAnalyzer {
    * @returns Array of discovered symbol descriptors, or empty array if the
    *          language server doesn't provide document symbols.
    */
-  async listFileSymbols(
-    filePath: string
-  ): Promise<FileSymbolDescriptor[]> {
+  async listFileSymbols(filePath: string): Promise<FileSymbolDescriptor[]> {
     logger.debug(`StaticAnalyzer.listFileSymbols: ${filePath}`);
     try {
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -559,9 +565,7 @@ export class StaticAnalyzer {
       const results: FileSymbolDescriptor[] = [];
       this._flattenSymbols(docSymbols, filePath, [], results);
 
-      logger.info(
-        `StaticAnalyzer.listFileSymbols: found ${results.length} symbols in ${filePath}`
-      );
+      logger.info(`StaticAnalyzer.listFileSymbols: found ${results.length} symbols in ${filePath}`);
       return results;
     } catch (err) {
       logger.warn(`StaticAnalyzer.listFileSymbols: failed for ${filePath}: ${err}`);

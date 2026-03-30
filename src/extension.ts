@@ -82,8 +82,15 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- Hover Provider ---
   const hoverProvider = new CodeExplorerHoverProvider(cacheStore, workspaceRoot);
   const hoverLanguages = [
-    'typescript', 'javascript', 'typescriptreact', 'javascriptreact',
-    'cpp', 'c', 'python', 'java', 'csharp',
+    'typescript',
+    'javascript',
+    'typescriptreact',
+    'javascriptreact',
+    'cpp',
+    'c',
+    'python',
+    'java',
+    'csharp',
   ];
   for (const lang of hoverLanguages) {
     context.subscriptions.push(
@@ -95,8 +102,15 @@ export function activate(context: vscode.ExtensionContext): void {
   // --- CodeLens Provider ---
   const codeLensProvider = new CodeExplorerCodeLensProvider(cacheStore, workspaceRoot);
   const codeLensLanguages = [
-    'typescript', 'javascript', 'typescriptreact', 'javascriptreact',
-    'cpp', 'c', 'python', 'java', 'csharp',
+    'typescript',
+    'javascript',
+    'typescriptreact',
+    'javascriptreact',
+    'cpp',
+    'c',
+    'python',
+    'java',
+    'csharp',
   ];
   for (const lang of codeLensLanguages) {
     context.subscriptions.push(
@@ -319,9 +333,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
           logger.warn('exploreFileSymbols: no active editor');
-          vscode.window.showWarningMessage(
-            'No active editor. Open a file to explore its symbols.'
-          );
+          vscode.window.showWarningMessage('No active editor. Open a file to explore its symbols.');
           return;
         }
 
@@ -486,11 +498,11 @@ export function activate(context: vscode.ExtensionContext): void {
                 graph = await graphBuilder.buildGraph();
               }
 
-              const centerId = cursorWord && cursorFilePath
-                ? graph.nodes.find(
-                    (n) => n.name === cursorWord && n.filePath === cursorFilePath
-                  )?.id
-                : undefined;
+              const centerId =
+                cursorWord && cursorFilePath
+                  ? graph.nodes.find((n) => n.name === cursorWord && n.filePath === cursorFilePath)
+                      ?.id
+                  : undefined;
               const mermaidSource = GraphBuilder.toMermaid(graph, centerId);
               viewProvider.showDependencyGraph(
                 mermaidSource,

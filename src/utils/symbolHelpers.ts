@@ -65,10 +65,7 @@ export function buildScopeChainForPosition(
 ): string[] {
   for (const sym of symbols) {
     if (sym.range.contains(position)) {
-      const childChain = buildScopeChainForPosition(sym.children, position, [
-        ...chain,
-        sym.name,
-      ]);
+      const childChain = buildScopeChainForPosition(sym.children, position, [...chain, sym.name]);
       // Return the deepest chain found
       return childChain.length > chain.length ? childChain : [...chain, sym.name];
     }

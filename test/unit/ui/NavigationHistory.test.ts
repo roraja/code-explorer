@@ -13,11 +13,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { TabSessionStore } from '../../../src/ui/TabSessionStore';
 import type { PersistedTab } from '../../../src/ui/TabSessionStore';
-import type {
-  SymbolInfo,
-  NavigationEntry,
-  PinnedInvestigation,
-} from '../../../src/models/types';
+import type { SymbolInfo, NavigationEntry, PinnedInvestigation } from '../../../src/models/types';
 
 function makeSymbol(name: string, kind: SymbolInfo['kind'] = 'function'): SymbolInfo {
   return {
@@ -115,10 +111,7 @@ suite('Navigation History Persistence', () => {
   });
 
   test('save and load preserves pinned investigations', () => {
-    const tabs = [
-      makeTab('tab-1', makeSymbol('foo')),
-      makeTab('tab-2', makeSymbol('bar')),
-    ];
+    const tabs = [makeTab('tab-1', makeSymbol('foo')), makeTab('tab-2', makeSymbol('bar'))];
     const investigations: PinnedInvestigation[] = [
       makeInvestigation('inv-1', 'Cache debugging', [
         { tabId: 'tab-1', symbolName: 'foo', symbolKind: 'function' },
@@ -146,12 +139,7 @@ suite('Navigation History Persistence', () => {
 
   test('backward-compatible load without navigation history', () => {
     // Simulate a session saved by the old version (no history fields)
-    const filePath = path.join(
-      tmpDir,
-      '.vscode',
-      'code-explorer-logs',
-      'tab-session.json'
-    );
+    const filePath = path.join(tmpDir, '.vscode', 'code-explorer-logs', 'tab-session.json');
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     const oldSession = {
       version: 1,

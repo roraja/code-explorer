@@ -81,9 +81,7 @@ export class TabSessionStore {
       const dir = path.dirname(this._sessionFilePath);
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(this._sessionFilePath, JSON.stringify(session, null, 2), 'utf-8');
-      logger.debug(
-        `TabSessionStore.save: persisted ${tabs.length} tabs, active=${activeTabId}`
-      );
+      logger.debug(`TabSessionStore.save: persisted ${tabs.length} tabs, active=${activeTabId}`);
     } catch (err) {
       // Non-fatal — worst case we lose tab state on reload
       logger.warn(`TabSessionStore.save: failed to write session file: ${err}`);
@@ -105,11 +103,7 @@ export class TabSessionStore {
       const session = JSON.parse(content) as TabSession;
 
       // Basic validation
-      if (
-        !session ||
-        session.version !== 1 ||
-        !Array.isArray(session.tabs)
-      ) {
+      if (!session || session.version !== 1 || !Array.isArray(session.tabs)) {
         logger.warn('TabSessionStore.load: invalid session file format, ignoring');
         return null;
       }

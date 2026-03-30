@@ -43,11 +43,7 @@ export abstract class BaseExtractor {
    * @param sourceHash SHA-256 hash of the source file content.
    * @returns Array of fully resolved SymbolIndexEntry objects.
    */
-  extract(
-    rootNode: Parser.SyntaxNode,
-    filePath: string,
-    sourceHash: string
-  ): SymbolIndexEntry[] {
+  extract(rootNode: Parser.SyntaxNode, filePath: string, sourceHash: string): SymbolIndexEntry[] {
     const rawSymbols = this.extractRaw(rootNode, filePath);
     return this._resolveEntries(rawSymbols, filePath, sourceHash);
   }
@@ -121,13 +117,7 @@ export abstract class BaseExtractor {
           const sig = raw.paramSignature ?? '';
           const discriminator = computeDiscriminator(sig);
           entries.push({
-            address: buildAddress(
-              filePath,
-              raw.scopeChain,
-              raw.kind,
-              raw.name,
-              discriminator
-            ),
+            address: buildAddress(filePath, raw.scopeChain, raw.kind, raw.name, discriminator),
             name: raw.name,
             kind: raw.kind,
             filePath,

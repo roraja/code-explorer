@@ -25,8 +25,7 @@ import { logger } from '../utils/logger';
 
 export class CodeExplorerCodeLensProvider implements vscode.CodeLensProvider {
   private readonly _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
-  public readonly onDidChangeCodeLenses: vscode.Event<void> =
-    this._onDidChangeCodeLenses.event;
+  public readonly onDidChangeCodeLenses: vscode.Event<void> = this._onDidChangeCodeLenses.event;
 
   constructor(
     private readonly _cacheStore: CacheStore,
@@ -91,14 +90,7 @@ export class CodeExplorerCodeLensProvider implements vscode.CodeLensProvider {
       if (analysis.overview) {
         const overview = this._truncateToOneLine(analysis.overview, 100);
         const label = `$(symbol-${this._kindToIcon(analysis.symbol.kind)}) Code Explorer: ${overview}`;
-        lenses.push(
-          this._createCodeLens(
-            symbolLine,
-            label,
-            analysis.symbol.name,
-            relPath
-          )
-        );
+        lenses.push(this._createCodeLens(symbolLine, label, analysis.symbol.name, relPath));
       }
 
       // 2. Function Steps — approximate line annotations
@@ -148,10 +140,7 @@ export class CodeExplorerCodeLensProvider implements vscode.CodeLensProvider {
   /**
    * CodeLens resolve is a no-op since we provide the command in provideCodeLenses.
    */
-  resolveCodeLens(
-    codeLens: vscode.CodeLens,
-    _token: vscode.CancellationToken
-  ): vscode.CodeLens {
+  resolveCodeLens(codeLens: vscode.CodeLens, _token: vscode.CancellationToken): vscode.CodeLens {
     return codeLens;
   }
 
@@ -195,12 +184,7 @@ export class CodeExplorerCodeLensProvider implements vscode.CodeLensProvider {
       for (const step of steps) {
         const truncated = this._truncateToOneLine(step.description, 90);
         lenses.push(
-          this._createCodeLens(
-            symbolLine,
-            `Step ${step.step}: ${truncated}`,
-            symbolName,
-            filePath
-          )
+          this._createCodeLens(symbolLine, `Step ${step.step}: ${truncated}`, symbolName, filePath)
         );
       }
       return lenses;
@@ -210,10 +194,7 @@ export class CodeExplorerCodeLensProvider implements vscode.CodeLensProvider {
     const linesPerStep = Math.floor(bodySpan / steps.length);
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
-      const approximateLine = Math.min(
-        symbolLine + 1 + i * linesPerStep,
-        lineCount - 1
-      );
+      const approximateLine = Math.min(symbolLine + 1 + i * linesPerStep, lineCount - 1);
       const truncated = this._truncateToOneLine(step.description, 90);
       lenses.push(
         this._createCodeLens(
@@ -255,12 +236,7 @@ export class CodeExplorerCodeLensProvider implements vscode.CodeLensProvider {
       const typeIcon = this._dataFlowTypeIcon(df.type);
       const truncated = this._truncateToOneLine(df.description, 80);
       lenses.push(
-        this._createCodeLens(
-          line,
-          `${typeIcon} Data: ${truncated}`,
-          symbolName,
-          currentFilePath
-        )
+        this._createCodeLens(line, `${typeIcon} Data: ${truncated}`, symbolName, currentFilePath)
       );
     }
 

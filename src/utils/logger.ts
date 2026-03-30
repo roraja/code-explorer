@@ -280,9 +280,7 @@ export const logger = {
   endCommandLog(): void {
     if (_activeCommandLogStream) {
       _activeCommandLogStream.write(
-        `${'─'.repeat(72)}\n` +
-          `Ended: ${new Date().toISOString()}\n` +
-          `${'─'.repeat(72)}\n`
+        `${'─'.repeat(72)}\n` + `Ended: ${new Date().toISOString()}\n` + `${'─'.repeat(72)}\n`
       );
       _activeCommandLogStream.end();
       _activeCommandLogStream = undefined;

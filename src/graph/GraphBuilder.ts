@@ -93,9 +93,7 @@ export class GraphBuilder {
         continue; // deduplicate
       }
 
-      const overview = analysis.overview
-        ? this._firstSentence(analysis.overview)
-        : '';
+      const overview = analysis.overview ? this._firstSentence(analysis.overview) : '';
 
       nodes.set(nodeId, {
         id: nodeId,
@@ -132,11 +130,7 @@ export class GraphBuilder {
           if (!cs.caller.filePath || !cs.caller.name) {
             continue;
           }
-          const callerId = this._findNodeByNameAndFile(
-            nodes,
-            cs.caller.name,
-            cs.caller.filePath
-          );
+          const callerId = this._findNodeByNameAndFile(nodes, cs.caller.name, cs.caller.filePath);
           if (callerId && callerId !== sourceId) {
             edges.push({ from: callerId, to: sourceId, type: 'calls' });
           }
@@ -157,11 +151,7 @@ export class GraphBuilder {
       // Relationships: extends, implements, uses
       if (analysis.relationships) {
         for (const rel of analysis.relationships) {
-          const targetId = this._findNodeByNameAndFile(
-            nodes,
-            rel.targetName,
-            rel.targetFilePath
-          );
+          const targetId = this._findNodeByNameAndFile(nodes, rel.targetName, rel.targetFilePath);
           if (targetId && targetId !== sourceId) {
             const edgeType =
               rel.type === 'extends' || rel.type === 'extended-by'
@@ -208,19 +198,14 @@ export class GraphBuilder {
    * Includes the symbol itself, its direct callers, sub-functions,
    * and dependencies (1 hop out).
    */
-  async buildSubgraph(
-    symbolName: string,
-    filePath: string
-  ): Promise<DependencyGraph> {
+  async buildSubgraph(symbolName: string, filePath: string): Promise<DependencyGraph> {
     const fullGraph = await this.buildGraph();
     const centerNode = fullGraph.nodes.find(
       (n) => n.name === symbolName && n.filePath === filePath
     );
 
     if (!centerNode) {
-      logger.info(
-        `GraphBuilder.buildSubgraph: symbol "${symbolName}" not found in graph`
-      );
+      logger.info(`GraphBuilder.buildSubgraph: symbol "${symbolName}" not found in graph`);
       return { nodes: [], edges: [], builtAt: new Date().toISOString() };
     }
 
@@ -345,10 +330,7 @@ export class GraphBuilder {
     return results;
   }
 
-  private async _scanDirectory(
-    dirPath: string,
-    results: AnalysisResult[]
-  ): Promise<void> {
+  private async _scanDirectory(dirPath: string, results: AnalysisResult[]): Promise<void> {
     let entries: string[];
     try {
       entries = await fs.readdir(dirPath);
@@ -481,10 +463,7 @@ export class GraphBuilder {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _parseJsonBlock(content: string, blockName: string): any[] | null {
-    const regex = new RegExp(
-      '```json:' + blockName + '\\s*\\n([\\s\\S]*?)\\n\\s*```',
-      'm'
-    );
+    const regex = new RegExp('```json:' + blockName + '\\s*\\n([\\s\\S]*?)\\n\\s*```', 'm');
     const match = content.match(regex);
     if (!match) {
       return null;
@@ -547,10 +526,7 @@ export class GraphBuilder {
   /**
    * Find a node by name only (for loose dependency matching).
    */
-  private _findNodeByName(
-    nodes: Map<string, GraphNode>,
-    name: string
-  ): string | null {
+  private _findNodeByName(nodes: Map<string, GraphNode>, name: string): string | null {
     // Clean up the dependency name (may contain paths, backticks, etc.)
     const cleanName = name.replace(/`/g, '').replace(/\*\*/g, '').trim();
     // Try exact match first

@@ -11,7 +11,10 @@ import * as os from 'os';
 import { SymbolIndex, type SymbolIndexEntry } from '../../../src/indexing/SymbolIndex';
 
 /** Create a minimal SymbolIndexEntry for testing. */
-function makeEntry(overrides: Partial<SymbolIndexEntry> & Pick<SymbolIndexEntry, 'address' | 'name' | 'kind' | 'filePath'>): SymbolIndexEntry {
+function makeEntry(
+  overrides: Partial<SymbolIndexEntry> &
+    Pick<SymbolIndexEntry, 'address' | 'name' | 'kind' | 'filePath'>
+): SymbolIndexEntry {
   return {
     startLine: 0,
     endLine: 10,
@@ -113,10 +116,14 @@ suite('SymbolIndex', () => {
     test('symbolCount tracks total entries', () => {
       assert.strictEqual(index.symbolCount, 0);
 
-      index.addFileEntries('a.ts', [
-        makeEntry({ address: 'a.ts#fn.x', name: 'x', kind: 'function', filePath: 'a.ts' }),
-        makeEntry({ address: 'a.ts#fn.y', name: 'y', kind: 'function', filePath: 'a.ts' }),
-      ], 'sha256:a');
+      index.addFileEntries(
+        'a.ts',
+        [
+          makeEntry({ address: 'a.ts#fn.x', name: 'x', kind: 'function', filePath: 'a.ts' }),
+          makeEntry({ address: 'a.ts#fn.y', name: 'y', kind: 'function', filePath: 'a.ts' }),
+        ],
+        'sha256:a'
+      );
 
       assert.strictEqual(index.symbolCount, 2);
     });
@@ -124,9 +131,18 @@ suite('SymbolIndex', () => {
 
   suite('removeFile', () => {
     test('removes all entries for a file', () => {
-      index.addFileEntries('src/a.ts', [
-        makeEntry({ address: 'src/a.ts#fn.foo', name: 'foo', kind: 'function', filePath: 'src/a.ts' }),
-      ], 'sha256:a');
+      index.addFileEntries(
+        'src/a.ts',
+        [
+          makeEntry({
+            address: 'src/a.ts#fn.foo',
+            name: 'foo',
+            kind: 'function',
+            filePath: 'src/a.ts',
+          }),
+        ],
+        'sha256:a'
+      );
 
       assert.strictEqual(index.symbolCount, 1);
       index.removeFile('src/a.ts');
@@ -136,12 +152,16 @@ suite('SymbolIndex', () => {
     });
 
     test('removing one file does not affect other files', () => {
-      index.addFileEntries('a.ts', [
-        makeEntry({ address: 'a.ts#fn.x', name: 'x', kind: 'function', filePath: 'a.ts' }),
-      ], 'sha256:a');
-      index.addFileEntries('b.ts', [
-        makeEntry({ address: 'b.ts#fn.y', name: 'y', kind: 'function', filePath: 'b.ts' }),
-      ], 'sha256:b');
+      index.addFileEntries(
+        'a.ts',
+        [makeEntry({ address: 'a.ts#fn.x', name: 'x', kind: 'function', filePath: 'a.ts' })],
+        'sha256:a'
+      );
+      index.addFileEntries(
+        'b.ts',
+        [makeEntry({ address: 'b.ts#fn.y', name: 'y', kind: 'function', filePath: 'b.ts' })],
+        'sha256:b'
+      );
 
       index.removeFile('a.ts');
       assert.strictEqual(index.symbolCount, 1);
@@ -151,13 +171,17 @@ suite('SymbolIndex', () => {
 
   suite('addFileEntries replaces existing', () => {
     test('replaces old entries when re-adding file', () => {
-      index.addFileEntries('a.ts', [
-        makeEntry({ address: 'a.ts#fn.old', name: 'old', kind: 'function', filePath: 'a.ts' }),
-      ], 'sha256:a');
+      index.addFileEntries(
+        'a.ts',
+        [makeEntry({ address: 'a.ts#fn.old', name: 'old', kind: 'function', filePath: 'a.ts' })],
+        'sha256:a'
+      );
 
-      index.addFileEntries('a.ts', [
-        makeEntry({ address: 'a.ts#fn.new', name: 'new', kind: 'function', filePath: 'a.ts' }),
-      ], 'sha256:a2');
+      index.addFileEntries(
+        'a.ts',
+        [makeEntry({ address: 'a.ts#fn.new', name: 'new', kind: 'function', filePath: 'a.ts' })],
+        'sha256:a2'
+      );
 
       assert.strictEqual(index.symbolCount, 1);
       assert.strictEqual(index.getByAddress('a.ts#fn.old'), undefined);
@@ -167,24 +191,28 @@ suite('SymbolIndex', () => {
 
   suite('resolveAtCursor', () => {
     test('resolves cursor to the correct symbol', () => {
-      index.addFileEntries('src/main.cpp', [
-        makeEntry({
-          address: 'src/main.cpp#fn.printBanner',
-          name: 'printBanner',
-          kind: 'function',
-          filePath: 'src/main.cpp',
-          startLine: 13,
-          endLine: 17,
-        }),
-        makeEntry({
-          address: 'src/main.cpp#fn.main',
-          name: 'main',
-          kind: 'function',
-          filePath: 'src/main.cpp',
-          startLine: 27,
-          endLine: 92,
-        }),
-      ], 'sha256:abc');
+      index.addFileEntries(
+        'src/main.cpp',
+        [
+          makeEntry({
+            address: 'src/main.cpp#fn.printBanner',
+            name: 'printBanner',
+            kind: 'function',
+            filePath: 'src/main.cpp',
+            startLine: 13,
+            endLine: 17,
+          }),
+          makeEntry({
+            address: 'src/main.cpp#fn.main',
+            name: 'main',
+            kind: 'function',
+            filePath: 'src/main.cpp',
+            startLine: 27,
+            endLine: 92,
+          }),
+        ],
+        'sha256:abc'
+      );
 
       const result = index.resolveAtCursor('src/main.cpp', 15, 0);
       assert.ok(result);
@@ -192,26 +220,30 @@ suite('SymbolIndex', () => {
     });
 
     test('resolves cursor to deepest (most specific) symbol', () => {
-      index.addFileEntries('src/main.cpp', [
-        makeEntry({
-          address: 'src/main.cpp#fn.main',
-          name: 'main',
-          kind: 'function',
-          filePath: 'src/main.cpp',
-          startLine: 27,
-          endLine: 92,
-          scopeChain: [],
-        }),
-        makeEntry({
-          address: 'src/main.cpp#main::var.logger',
-          name: 'logger',
-          kind: 'variable',
-          filePath: 'src/main.cpp',
-          startLine: 37,
-          endLine: 37,
-          scopeChain: ['main'],
-        }),
-      ], 'sha256:abc');
+      index.addFileEntries(
+        'src/main.cpp',
+        [
+          makeEntry({
+            address: 'src/main.cpp#fn.main',
+            name: 'main',
+            kind: 'function',
+            filePath: 'src/main.cpp',
+            startLine: 27,
+            endLine: 92,
+            scopeChain: [],
+          }),
+          makeEntry({
+            address: 'src/main.cpp#main::var.logger',
+            name: 'logger',
+            kind: 'variable',
+            filePath: 'src/main.cpp',
+            startLine: 37,
+            endLine: 37,
+            scopeChain: ['main'],
+          }),
+        ],
+        'sha256:abc'
+      );
 
       const result = index.resolveAtCursor('src/main.cpp', 37, 0);
       assert.ok(result);
@@ -220,16 +252,20 @@ suite('SymbolIndex', () => {
     });
 
     test('returns undefined for cursor outside any symbol', () => {
-      index.addFileEntries('src/main.cpp', [
-        makeEntry({
-          address: 'src/main.cpp#fn.foo',
-          name: 'foo',
-          kind: 'function',
-          filePath: 'src/main.cpp',
-          startLine: 10,
-          endLine: 20,
-        }),
-      ], 'sha256:abc');
+      index.addFileEntries(
+        'src/main.cpp',
+        [
+          makeEntry({
+            address: 'src/main.cpp#fn.foo',
+            name: 'foo',
+            kind: 'function',
+            filePath: 'src/main.cpp',
+            startLine: 10,
+            endLine: 20,
+          }),
+        ],
+        'sha256:abc'
+      );
 
       assert.strictEqual(index.resolveAtCursor('src/main.cpp', 5, 0), undefined);
     });
@@ -252,27 +288,31 @@ suite('SymbolIndex', () => {
 
   suite('persistence (save/load)', () => {
     test('round-trips through save and load', async () => {
-      index.addFileEntries('src/main.cpp', [
-        makeEntry({
-          address: 'src/main.cpp#fn.printBanner',
-          name: 'printBanner',
-          kind: 'function',
-          filePath: 'src/main.cpp',
-          startLine: 13,
-          endLine: 17,
-          paramSignature: '',
-        }),
-        makeEntry({
-          address: 'src/main.cpp#main::var.logger',
-          name: 'logger',
-          kind: 'variable',
-          filePath: 'src/main.cpp',
-          startLine: 37,
-          endLine: 37,
-          scopeChain: ['main'],
-          isLocal: true,
-        }),
-      ], 'sha256:abc');
+      index.addFileEntries(
+        'src/main.cpp',
+        [
+          makeEntry({
+            address: 'src/main.cpp#fn.printBanner',
+            name: 'printBanner',
+            kind: 'function',
+            filePath: 'src/main.cpp',
+            startLine: 13,
+            endLine: 17,
+            paramSignature: '',
+          }),
+          makeEntry({
+            address: 'src/main.cpp#main::var.logger',
+            name: 'logger',
+            kind: 'variable',
+            filePath: 'src/main.cpp',
+            startLine: 37,
+            endLine: 37,
+            scopeChain: ['main'],
+            isLocal: true,
+          }),
+        ],
+        'sha256:abc'
+      );
 
       await index.save();
 
@@ -300,24 +340,28 @@ suite('SymbolIndex', () => {
     });
 
     test('persists overload discriminators', async () => {
-      index.addFileEntries('a.ts', [
-        makeEntry({
-          address: 'a.ts#fn.parse~d1a0',
-          name: 'parse',
-          kind: 'function',
-          filePath: 'a.ts',
-          paramSignature: 'string',
-          overloadDiscriminator: 'd1a0',
-        }),
-        makeEntry({
-          address: 'a.ts#fn.parse~e5b3',
-          name: 'parse',
-          kind: 'function',
-          filePath: 'a.ts',
-          paramSignature: 'Buffer',
-          overloadDiscriminator: 'e5b3',
-        }),
-      ], 'sha256:abc');
+      index.addFileEntries(
+        'a.ts',
+        [
+          makeEntry({
+            address: 'a.ts#fn.parse~d1a0',
+            name: 'parse',
+            kind: 'function',
+            filePath: 'a.ts',
+            paramSignature: 'string',
+            overloadDiscriminator: 'd1a0',
+          }),
+          makeEntry({
+            address: 'a.ts#fn.parse~e5b3',
+            name: 'parse',
+            kind: 'function',
+            filePath: 'a.ts',
+            paramSignature: 'Buffer',
+            overloadDiscriminator: 'e5b3',
+          }),
+        ],
+        'sha256:abc'
+      );
 
       await index.save();
 
@@ -336,9 +380,11 @@ suite('SymbolIndex', () => {
 
   suite('clear', () => {
     test('clears all entries', () => {
-      index.addFileEntries('a.ts', [
-        makeEntry({ address: 'a.ts#fn.x', name: 'x', kind: 'function', filePath: 'a.ts' }),
-      ], 'sha256:a');
+      index.addFileEntries(
+        'a.ts',
+        [makeEntry({ address: 'a.ts#fn.x', name: 'x', kind: 'function', filePath: 'a.ts' })],
+        'sha256:a'
+      );
 
       assert.strictEqual(index.symbolCount, 1);
       index.clear();

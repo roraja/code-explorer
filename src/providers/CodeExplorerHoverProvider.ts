@@ -94,10 +94,10 @@ export class CodeExplorerHoverProvider implements vscode.HoverProvider {
     if (result.functionInputs && result.functionInputs.length > 0) {
       md.appendMarkdown('---\n\n');
       const returnType = result.functionOutput?.typeName;
-      const params = result.functionInputs
-        .map((p) => `\`${p.name}: ${p.typeName}\``)
-        .join(', ');
-      md.appendMarkdown(`**Signature:** (${params})${returnType ? ` → \`${returnType}\`` : ''}\n\n`);
+      const params = result.functionInputs.map((p) => `\`${p.name}: ${p.typeName}\``).join(', ');
+      md.appendMarkdown(
+        `**Signature:** (${params})${returnType ? ` → \`${returnType}\`` : ''}\n\n`
+      );
     }
     if (result.callStacks && result.callStacks.length > 0) {
       stats.push(`${result.callStacks.length} caller${result.callStacks.length !== 1 ? 's' : ''}`);

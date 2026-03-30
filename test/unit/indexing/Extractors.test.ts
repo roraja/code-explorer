@@ -434,7 +434,11 @@ class Foo {
     const addr1 = entries1.map((e) => e.address).sort();
     const addr2 = entries2.map((e) => e.address).sort();
 
-    assert.deepStrictEqual(addr1, addr2, 'Addresses should be identical despite whitespace changes');
+    assert.deepStrictEqual(
+      addr1,
+      addr2,
+      'Addresses should be identical despite whitespace changes'
+    );
   });
 
   test('addresses are stable when methods are reordered', () => {

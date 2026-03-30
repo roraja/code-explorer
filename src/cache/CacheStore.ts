@@ -120,10 +120,7 @@ export class CacheStore {
    * @param symbol   SymbolInfo to attach to the result (for display)
    * @returns The AnalysisResult if found and parseable, or null on miss.
    */
-  async readByAddress(
-    address: string,
-    symbol: SymbolInfo
-  ): Promise<AnalysisResult | null> {
+  async readByAddress(address: string, symbol: SymbolInfo): Promise<AnalysisResult | null> {
     // Derive cache path from the address using the shared utility.
     // addressToCacheComponents splits "file#scope::kind.name" into
     // { filePath, fileName } so the path derivation logic is defined
@@ -144,8 +141,14 @@ export class CacheStore {
       const result = this._deserialize(content, symbol);
       if (result) {
         // Compute the relative cache path from the address components
-        const { filePath: addrFilePath, fileName: addrFileName } = addressToCacheComponents(address);
-        result.metadata.cacheFilePath = path.join('.vscode', CACHE.DIR_NAME, addrFilePath, addrFileName);
+        const { filePath: addrFilePath, fileName: addrFileName } =
+          addressToCacheComponents(address);
+        result.metadata.cacheFilePath = path.join(
+          '.vscode',
+          CACHE.DIR_NAME,
+          addrFilePath,
+          addrFileName
+        );
         const age = Date.now() - new Date(result.metadata.analyzedAt).getTime();
         const ageHours = Math.round(age / 3600000);
         logger.info(
@@ -639,7 +642,10 @@ If no match, output:
       }
 
       result.metadata.cacheFilePath = path.join(
-        '.vscode', CACHE.DIR_NAME, cursor.filePath, matched.fileName
+        '.vscode',
+        CACHE.DIR_NAME,
+        cursor.filePath,
+        matched.fileName
       );
 
       const age = Date.now() - new Date(result.metadata.analyzedAt).getTime();

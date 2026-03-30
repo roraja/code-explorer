@@ -196,8 +196,17 @@ function render(): void {
 
   const activeTab = currentTabs.find((t) => t.id === currentActiveTabId) || currentTabs[0];
 
-  root.innerHTML = renderTabBar() + renderBreadcrumbBar() + renderContent(activeTab);
+  root.innerHTML =
+    '<div class="main-layout">' +
+    renderTabBar() +
+    '<div class="tab-resize-handle" id="tab-resize-handle"></div>' +
+    '<div class="content-panel">' +
+    renderBreadcrumbBar() +
+    renderContent(activeTab) +
+    '</div>' +
+    '</div>';
   attachListeners();
+  _attachResizeHandle();
   renderMermaidDiagrams();
 }
 
@@ -235,7 +244,9 @@ function renderEmpty(): string {
 }
 
 function renderTabBar(): string {
-  const tabs = currentTabs
+  // Reverse so newest tab appears first
+  const tabs = [...currentTabs]
+    .reverse()
     .map((tab) => {
       const active = tab.id === currentActiveTabId ? ' tab--active' : '';
       const icon = kindIcon(tab.symbol.kind);
@@ -1234,6 +1245,57 @@ function renderSection(title: string, content: string): string {
     <summary class="section__title">${title}</summary>
     <div class="section__body">${content}</div>
   </details>`;
+}
+
+// =====================
+// Resize Handle
+// =====================
+
+/** Persisted tab sidebar width — survives re-renders within the same session */
+let _tabSidebarWidth: number | null = null;
+
+function _attachResizeHandle(): void {
+  const handle = document.getElementById('tab-resize-handle');
+  const tabBar = document.querySelector('.tab-bar') as HTMLElement | null;
+  if (!handle || !tabBar) {
+    return;
+  }
+
+  // Restore persisted width if available
+  if (_tabSidebarWidth !== null) {
+    tabBar.style.width = `${_tabSidebarWidth}px`;
+  }
+
+  let startX = 0;
+  let startWidth = 0;
+
+  const onMouseMove = (e: MouseEvent) => {
+    e.preventDefault();
+    const delta = e.clientX - startX;
+    const newWidth = Math.max(60, Math.min(startWidth + delta, window.innerWidth * 0.5));
+    tabBar.style.width = `${newWidth}px`;
+    _tabSidebarWidth = newWidth;
+  };
+
+  const onMouseUp = () => {
+    handle.classList.remove('resizing');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  };
+
+  handle.addEventListener('mousedown', (e: Event) => {
+    const me = e as MouseEvent;
+    me.preventDefault();
+    startX = me.clientX;
+    startWidth = tabBar.getBoundingClientRect().width;
+    handle.classList.add('resizing');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
 }
 
 // =====================

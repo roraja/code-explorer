@@ -31,7 +31,53 @@ body {
 #root {
   height: 100%;
   display: flex;
+  flex-direction: row;
+}
+
+/* =====================
+   Main Layout (sidebar + content)
+   ===================== */
+
+.main-layout {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.content-panel {
+  flex: 1;
+  display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Resize handle between tab sidebar and content */
+.tab-resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+  position: relative;
+}
+
+.tab-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.tab-resize-handle:hover::after,
+.tab-resize-handle.resizing::after {
+  background: var(--vscode-focusBorder, #007acc);
 }
 
 /* =====================
@@ -120,15 +166,20 @@ body {
 
 .tab-bar {
   display: flex;
-  overflow-x: auto;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBar-background));
-  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-widget-border, #333));
-  min-height: 30px;
+  border-right: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-widget-border, #333));
+  width: var(--tab-sidebar-width, 140px);
+  min-width: 60px;
+  max-width: 50%;
   flex-shrink: 0;
+  height: 100%;
 }
 
 .tab-bar::-webkit-scrollbar {
-  height: 3px;
+  width: 3px;
 }
 
 .tab-bar::-webkit-scrollbar-thumb {
@@ -139,14 +190,14 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 5px 8px;
   font-size: 12px;
   cursor: pointer;
-  white-space: nowrap;
-  border-right: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
   color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
   background: transparent;
   user-select: none;
+  flex-shrink: 0;
 }
 
 .tab:hover {
@@ -156,22 +207,26 @@ body {
 .tab--active {
   color: var(--vscode-tab-activeForeground, var(--vscode-foreground));
   background: var(--vscode-tab-activeBackground, var(--vscode-editor-background));
-  border-bottom: 2px solid var(--vscode-focusBorder, var(--vscode-tab-activeBorderTop, #007acc));
+  border-left: 2px solid var(--vscode-focusBorder, var(--vscode-tab-activeBorderTop, #007acc));
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
 }
 
 .tab__icon {
   font-size: 12px;
   opacity: 0.8;
+  flex-shrink: 0;
 }
 
 .tab__label {
-  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .tab__status {
   font-size: 10px;
+  flex-shrink: 0;
 }
 
 .tab__status--loading {
@@ -189,6 +244,8 @@ body {
   line-height: 1;
   padding: 0 2px;
   border-radius: 3px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .tab:hover .tab__close {

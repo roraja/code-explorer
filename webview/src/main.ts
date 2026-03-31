@@ -46,7 +46,7 @@ interface PinnedInvestigation {
   id: string;
   name: string;
   trail: string[];
-  trailSymbols: { tabId: string; symbolName: string; symbolKind: string }[];
+  trailSymbols: { tabId: string; symbolName: string; symbolKind: string; symbol?: unknown }[];
   pinnedAt: string;
 }
 
@@ -265,9 +265,8 @@ function renderTabBar(): string {
     </div>
   </div>`;
 
-  // Tab list (newest first, draggable)
-  const tabs = [...currentTabs]
-    .reverse()
+  // Tab list (draggable, in display order — newest first)
+  const tabs = currentTabs
     .map((tab) => {
       const active = tab.id === currentActiveTabId ? ' tab--active' : '';
       const icon = kindIcon(tab.symbol.kind);
@@ -798,6 +797,7 @@ function renderAnalysis(tab: Tab): string {
       <span class="enhance-bar__spinner"></span>
       <span class="enhance-bar__label">Enhancing\u2026</span>
     </button>
+    <button class="reanalyze-btn" data-tab-id="${tab.id}" title="Re-analyze this symbol from scratch, ignoring cached results">\uD83D\uDD04 Re-analyze</button>
     <button class="notes-btn" data-tab-id="${tab.id}" title="Edit notes">\uD83D\uDCDD Notes</button>
   </div>`);
   } else {
@@ -806,6 +806,7 @@ function renderAnalysis(tab: Tab): string {
       <span class="enhance-bar__icon">\u2728</span>
       <span class="enhance-bar__label">Enhance</span>
     </button>
+    <button class="reanalyze-btn" data-tab-id="${tab.id}" title="Re-analyze this symbol from scratch, ignoring cached results">\uD83D\uDD04 Re-analyze</button>
     <button class="notes-btn" data-tab-id="${tab.id}" title="Edit notes">\uD83D\uDCDD Notes</button>
   </div>`);
   }
@@ -1364,11 +1365,11 @@ function _attachDragAndDrop(): void {
         return;
       }
 
-      // Compute new order: the tabs in the sidebar are rendered in reverse order,
-      // so we need to work with the display order (reversed), then reverse back.
-      const displayOrder = [...currentTabs].reverse().map((t) => t.id);
-      const fromIdx = displayOrder.indexOf(_draggedTabId);
-      const toIdx = displayOrder.indexOf(targetId);
+      // Compute new order: tabs are now stored and displayed in the same order
+      // (display order = storage order), so we work directly with tab IDs.
+      const tabOrder = currentTabs.map((t) => t.id);
+      const fromIdx = tabOrder.indexOf(_draggedTabId);
+      const toIdx = tabOrder.indexOf(targetId);
       if (fromIdx < 0 || toIdx < 0) {
         return;
       }
@@ -1381,13 +1382,11 @@ function _attachDragAndDrop(): void {
         insertIdx--;
       }
 
-      // Reorder in display order
-      displayOrder.splice(fromIdx, 1);
-      displayOrder.splice(insertIdx, 0, _draggedTabId);
+      // Reorder and send to extension
+      tabOrder.splice(fromIdx, 1);
+      tabOrder.splice(insertIdx, 0, _draggedTabId);
 
-      // Reverse back to storage order and send to extension
-      const newOrder = [...displayOrder].reverse();
-      vscode.postMessage({ type: 'reorderTabs', tabIds: newOrder });
+      vscode.postMessage({ type: 'reorderTabs', tabIds: tabOrder });
     });
   });
 }
@@ -1497,6 +1496,18 @@ function attachListeners(): void {
         return;
       }
       _showEnhanceDialog(tabId);
+    });
+  });
+
+  // Re-analyze button — re-triggers full analysis from scratch, ignoring cache
+  document.querySelectorAll('.reanalyze-btn').forEach((el) => {
+    el.addEventListener('click', () => {
+      const tabId = (el as HTMLElement).dataset.tabId;
+      if (!tabId) {
+        return;
+      }
+      log(`reAnalyze: requesting re-analysis for tab ${tabId}`);
+      vscode.postMessage({ type: 'reAnalyze', tabId });
     });
   });
 

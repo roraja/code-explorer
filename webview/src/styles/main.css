@@ -519,6 +519,23 @@ body {
   color: var(--vscode-foreground);
 }
 
+.reanalyze-btn {
+  background: transparent;
+  border: 1px solid var(--vscode-button-secondaryBackground, rgba(255, 255, 255, 0.1));
+  border-radius: 4px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  margin-left: 4px;
+  font-family: var(--vscode-font-family);
+}
+
+.reanalyze-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+  color: var(--vscode-foreground);
+}
+
 /* =====================
    Loading State
    ===================== */

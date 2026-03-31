@@ -6,12 +6,13 @@ Shared utilities used across the extension host.
 
 | File | Role |
 |------|------|
-| `logger.ts` | Dual-output logger: VS Code OutputChannel + daily log files. Also manages per-LLM-call markdown log files. |
+| `logger.ts` | Dual-output logger: VS Code OutputChannel + daily log files. Also manages per-LLM-call markdown log files and per-command log files. |
 | `cli.ts` | `runCLI()` utility for spawning CLI processes with stdin piping, manual timeout, configurable cwd, and env overrides. |
+| `symbolHelpers.ts` | Shared symbol helper functions for traversing VS Code DocumentSymbol trees. Used by `StaticAnalyzer`, `SymbolResolver`, and `ShowSymbolInfoCommand`. |
 
 ## Logger
 
-Singleton-style module (not a class). Must call `logger.init(workspaceRoot)` during activation.
+Singleton-style module (not a class). Must call `logger.init(workspaceRoot, extensionVersion)` during activation.
 
 ### Output Destinations
 
@@ -49,7 +50,7 @@ Spawns a CLI process and returns stdout as a string.
 
 ```typescript
 interface CLIRunOptions {
-  command: string;          // e.g. 'claude', 'copilot'
+  command: string;          // e.g. 'claude', 'copilot', 'node'
   args: string[];
   stdinData: string;        // Prompt piped via stdin
   timeoutMs?: number;       // Default: 900000 (15 min)
@@ -70,8 +71,28 @@ interface CLIRunOptions {
 - Periodic "still waiting" log every 15 seconds
 - Stdin is written then closed (`child.stdin.write()` + `child.stdin.end()`)
 
+## Symbol Helpers (`symbolHelpers.ts`)
+
+Extracted shared functions previously duplicated across multiple files:
+
+| Function | Description |
+|----------|-------------|
+| `findDeepestSymbol(symbols, position, ancestors?)` | Walk the symbol tree to find the deepest `DocumentSymbol` whose range contains the position. Returns `DeepestSymbolMatch` with symbol + ancestor chain, or null. |
+| `buildScopeChainForPosition(symbols, position, chain?)` | Build a scope chain (array of ancestor names) for a given position. |
+| `mapVscodeSymbolKind(kind)` | Map VS Code `SymbolKind` enum to `SymbolKindType` string. Maps `Class`/`Struct` → `'class'`, `Function`/`Constructor` → `'function'`, `Method` → `'method'`, `Variable`/`Constant` → `'variable'`, etc. |
+
+### `DeepestSymbolMatch`
+
+```typescript
+interface DeepestSymbolMatch {
+  symbol: vscode.DocumentSymbol;
+  ancestors: vscode.DocumentSymbol[];  // root → parent, excludes the matched symbol
+}
+```
+
 ## Do NOT
 
 - Use `console.log` anywhere in the extension — use `logger.*` methods
 - Pass large prompts as CLI arguments — use stdin via `runCLI()`
 - Call `logger.init()` more than once per activation
+- Duplicate `findDeepestSymbol` or `mapVscodeSymbolKind` — import from `symbolHelpers.ts`

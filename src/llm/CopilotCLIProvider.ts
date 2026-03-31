@@ -34,10 +34,17 @@ export class CopilotCLIProvider implements LLMProvider {
   }
 
   async isAvailable(): Promise<boolean> {
+    // On Windows, 'where' is unreliable for detecting CLI tools that are
+    // installed as .cmd/.ps1 wrappers or via npm globals. Always assume
+    // copilot is available on win32 — if it truly isn't, the analyze()
+    // call will fail gracefully with a clear error.
+    if (process.platform === 'win32') {
+      logger.debug('copilot CLI: win32 detected, assuming available');
+      return true;
+    }
+
     try {
-      // Use 'where' on Windows, 'which' on Unix to locate the CLI binary
-      const cmd = process.platform === 'win32' ? 'where' : 'which';
-      await execFileAsync(cmd, ['copilot']);
+      await execFileAsync('which', ['copilot']);
       logger.debug('copilot CLI is available');
       return true;
     } catch {

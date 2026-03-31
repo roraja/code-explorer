@@ -1,12 +1,12 @@
 # src/git/
 
-ADO (Azure DevOps) content sync — manages syncing the `.vscode/code-explorer` cache folder with an ADO git repository by treating the cache directory as its own cloned git repo.
+ADO (Azure DevOps) content sync — manages syncing the `.vscode/code-explorer` cache folder with an ADO git repository. Two branches share the same cloned directory.
 
 ## Modules
 
 | File | Role |
 |------|------|
-| `AdoSync.ts` | `pullAdoContent()` and `pushAdoContent()` functions for syncing cache content with ADO |
+| `AdoSync.ts` | `pullAdoContent()`, `pushAdoContent()`, `pullAdoUpstream()`, `pushAdoUpstream()` functions for syncing cache content with ADO on two branches |
 
 ## How It Works
 
@@ -17,37 +17,57 @@ The `.vscode/code-explorer/` directory IS the ADO git repo — it's a full clone
 | Constant | Value |
 |----------|-------|
 | Remote URL | `https://microsoft.visualstudio.com/Edge/_git/edgeinternal.ai` |
-| Branch | `user/roraja/code-explorer/content` |
+| Content Branch | `user/roraja/code-explorer/content` |
+| Upstream Branch | `user/roraja/code-explorer/upstream` |
 
-### `pullAdoContent(workspaceRoot)`
+Both branches share the same `.vscode/code-explorer/` directory. Pull/push commands switch to the correct branch automatically.
 
-- **First time** (no `.vscode/code-explorer/.git`): Runs `git clone --branch <branch> --single-branch <url> <dir>`
-- **Subsequent times**: Runs `git pull --ff-only` inside the existing repo
+### Sync Targets
 
-Returns `AdoSyncResult` with success/failure, message, and detailed git command output.
+| Target | Branch | Label | Directory |
+|--------|--------|-------|-----------|
+| `CONTENT_TARGET` | `user/roraja/code-explorer/content` | `ADO Content` | `.vscode/code-explorer` |
+| `UPSTREAM_TARGET` | `user/roraja/code-explorer/upstream` | `ADO Upstream` | `.vscode/code-explorer` |
 
-### `pushAdoContent(workspaceRoot)`
+### `_pull(target, workspaceRoot)` — Generic Pull
+
+Handles three scenarios:
+1. **No `.git`**: `git clone --branch <branch> <url> <dir>`
+2. **Exists, correct branch**: `git pull --ff-only`
+3. **Exists, different branch**: `git fetch origin` → `git checkout <target>` (or create from remote) → `git pull --ff-only`
+
+### `_push(target, workspaceRoot)` — Generic Push
 
 Requires the directory to already be a cloned git repo (run Pull first).
 
-1. `git pull --ff-only` — sync with remote
-2. `git add -A` — stage all changes (new, modified, deleted files)
-3. `git commit -m "chore: sync ..."` — commit (no-op if nothing changed)
-4. `git push` — push to origin
-
-Returns `AdoSyncResult`.
+1. Ensure correct branch (switch if needed)
+2. `git pull --ff-only` — sync with remote
+3. `git add -A` — stage all changes
+4. `git commit -m "chore: sync ..."` — commit (no-op if nothing changed)
+5. `git push` — push to origin
 
 ### Git Command Execution
 
 Uses `child_process.spawn()` with `shell: true` on Windows for `.cmd`/`.bat` compatibility.
 
+## Public API
+
+| Function | Description |
+|----------|-------------|
+| `pullAdoContent(workspaceRoot)` | Pull content branch |
+| `pushAdoContent(workspaceRoot)` | Push content branch |
+| `pullAdoUpstream(workspaceRoot)` | Pull upstream branch |
+| `pushAdoUpstream(workspaceRoot)` | Push upstream branch |
+
 ## VS Code Integration
 
-Registered as two commands in `extension.ts`:
+Registered as four commands in `extension.ts`:
 - `codeExplorer.pullAdoContent` — "Code Explorer: Pull ADO Content"
 - `codeExplorer.pushAdoContent` — "Code Explorer: Push ADO Content" (with confirmation dialog)
+- `codeExplorer.pullAdoUpstream` — "Code Explorer: Pull ADO Upstream"
+- `codeExplorer.pushAdoUpstream` — "Code Explorer: Push ADO Upstream" (with confirmation dialog)
 
-Both show progress notifications during execution.
+All show progress notifications during execution.
 
 ## Exported Types
 

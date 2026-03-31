@@ -627,7 +627,13 @@ export interface PinnedInvestigation {
   /** The breadcrumb trail (sequence of tab IDs in exploration order) */
   trail: string[];
   /** Symbol names corresponding to each tab ID (for display after tabs are closed) */
-  trailSymbols: { tabId: string; symbolName: string; symbolKind: string }[];
+  trailSymbols: {
+    tabId: string;
+    symbolName: string;
+    symbolKind: string;
+    /** Full symbol info for re-creating tabs from cache when the original tab is closed */
+    symbol?: SymbolInfo;
+  }[];
   /** ISO 8601 timestamp of when this investigation was pinned */
   pinnedAt: string;
 }
@@ -754,6 +760,7 @@ export type WebviewToExtensionMessage =
   | { type: 'exploreSymbol'; symbolName: string; filePath?: string; line?: number; kind?: string }
   | { type: 'navigateToSymbol'; symbolName: string }
   | { type: 'enhanceAnalysis'; tabId: string; userPrompt: string }
+  | { type: 'reAnalyze'; tabId: string }
   | { type: 'requestDependencyGraph' }
   | { type: 'requestSymbolGraph'; symbolName: string; filePath: string }
   | { type: 'closeDependencyGraph' }

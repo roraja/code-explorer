@@ -7,10 +7,11 @@ LLM integration layer — providers, prompt building, and response parsing.
 | File | Role |
 |------|------|
 | `LLMProvider.ts` | `LLMProvider` interface: `name`, `isAvailable()`, `analyze(request)`, `getCapabilities()`, optional `setWorkspaceRoot(root)` |
-| `LLMProviderFactory.ts` | Factory that creates the right provider from config string (`copilot-cli`, `mai-claude`, `build-service`, `none`) |
+| `LLMProviderFactory.ts` | Factory that creates the right provider from config string (`copilot-cli`, `mai-claude`, `build-service`, `mock-copilot`, `none`) |
 | `CopilotCLIProvider.ts` | Spawns `copilot --yolo -s --output-format text` with prompt piped via stdin. Supports `setWorkspaceRoot()` for workspace-context execution. |
 | `MaiClaudeProvider.ts` | Spawns `claude -p --output-format text` with prompt via stdin. Deletes `CLAUDECODE` env var. Supports `setWorkspaceRoot()`. |
 | `BuildServiceProvider.ts` | Remote HTTP provider: submits prompt to Go build service (`POST /api/v1/copilot/run`), polls for job completion with incremental log streaming. No local CLI needed. Supports `setWorkspaceRoot()` and `setCrPaths()`. |
+| `MockCopilotProvider.ts` | Spawns `node tools/mock-copilot.js` with configurable delay. For testing the pipeline without a real LLM. Supports `setWorkspaceRoot()`. |
 | `NullProvider.ts` | No-op provider when LLM is disabled. `isAvailable()` returns false. |
 | `PromptBuilder.ts` | Builds prompts using strategy pattern (`build()`), unified prompt (`buildUnified()`), file analysis (`buildFileAnalysis()` fallback, `buildFileAnalysisFromSymbolList()` primary), and enhance (`buildEnhance()`). |
 | `ResponseParser.ts` | Parses LLM markdown responses: analysis fields, symbol identity, related symbol cache entries, diagrams, enhance responses. |
@@ -26,6 +27,8 @@ CLI-based providers use the shared `runCLI()` utility (`src/utils/cli.ts`) which
 
 The HTTP-based `BuildServiceProvider` uses native `http`/`https` modules (no dependencies) to POST prompts to the Go build service at `POST /api/v1/copilot/run`, then polls `GET /api/v1/jobs/{id}/logs` for incremental output until the job completes. It can also cancel timed-out jobs via `POST /api/v1/jobs/{id}/cancel`.
 
+The `MockCopilotProvider` spawns `node tools/mock-copilot.js` with a configurable delay. It echoes the prompt with metadata, useful for testing the full pipeline without a real LLM.
+
 ### Provider-Specific Details
 
 | Provider | Transport | Command/Endpoint | System Prompt | Env Handling | Workspace Context |
@@ -33,6 +36,16 @@ The HTTP-based `BuildServiceProvider` uses native `http`/`https` modules (no dep
 | `copilot-cli` | Local CLI | `copilot --yolo -s --output-format text` | Prepended into prompt text | None needed | `cwd` set via `setWorkspaceRoot()` |
 | `mai-claude` | Local CLI | `claude -p --output-format text` | Via `--append-system-prompt` flag | Must `delete env.CLAUDECODE` | `cwd` set via `setWorkspaceRoot()` |
 | `build-service` | HTTP API | `POST /api/v1/copilot/run` on Go build service | Prepended into prompt text | N/A (remote) | `cr_src_folder` + `depot_tools_path` in payload |
+| `mock-copilot` | Local CLI | `node tools/mock-copilot.js --delay <ms>` | Prepended into prompt text | None needed | `cwd` set via `setWorkspaceRoot()` |
+
+### BuildServiceProvider Output Collection
+
+Uses a **file-based output** model:
+1. Appends output-save instruction to prompt: "Save to `{{output_folder}}/analysis.md`"
+2. Go service replaces `{{output_folder}}` with temp dir path
+3. `output_files: ["analysis.md"]` tells the service which files to read back
+4. Collected file content returned in `result.output_files["analysis.md"]`
+5. Falls back to `output_tail` (raw stdout) if file collection fails
 
 ## PromptBuilder
 

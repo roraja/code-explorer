@@ -194,7 +194,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       loadingStage: 'cache-check',
     };
 
-    this._tabs.push(tab);
+    this._tabs.unshift(tab);
     this._activeTabId = tabId;
     this._recordNavigation(previousTabId, tabId, trigger, symbol.name, symbol.kind);
     this._pushState();
@@ -271,7 +271,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       loadingStage: 'resolving-symbol',
     };
 
-    this._tabs.push(tab);
+    this._tabs.unshift(tab);
     this._activeTabId = tabId;
     this._recordNavigation(previousTabId, tabId, 'explore-command', cursor.word, 'unknown');
     this._pushState();
@@ -602,6 +602,12 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         break;
       }
 
+      case 'reAnalyze': {
+        logger.info(`ViewProvider: reAnalyze for tab ${message.tabId}`);
+        this._handleReAnalyze(message.tabId);
+        break;
+      }
+
       case 'historyBack': {
         logger.debug('ViewProvider: historyBack');
         this._navigateHistoryBack();
@@ -705,6 +711,86 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       const message = err instanceof Error ? err.message : String(err);
       tab.enhancing = false;
       logger.error(`ViewProvider._handleEnhanceAnalysis: failed: ${message}`);
+    }
+
+    this._pushState();
+  }
+
+  /**
+   * Re-analyze a symbol from scratch, bypassing the cache entirely.
+   * Rebuilds a CursorContext from the tab's symbol info and re-runs
+   * the full LLM analysis pipeline with force=true.
+   */
+  private async _handleReAnalyze(tabId: string): Promise<void> {
+    const tab = this._tabs.find((t) => t.id === tabId);
+    if (!tab || !this._orchestrator) {
+      logger.warn(`ViewProvider._handleReAnalyze: tab ${tabId} not found or no orchestrator`);
+      return;
+    }
+
+    const symbol = tab.symbol;
+    logger.info(
+      `ViewProvider._handleReAnalyze: re-analyzing ${symbol.kind} "${symbol.name}" in ${symbol.filePath}`
+    );
+
+    // Put the tab back into loading state (preserving position in tab bar)
+    tab.status = 'loading';
+    tab.analysis = null;
+    tab.loadingStage = 'resolving-symbol';
+    delete tab.error;
+    delete tab.enhancing;
+    this._pushState();
+
+    try {
+      // Build a CursorContext from the existing symbol so we can use the
+      // unified analyzeFromCursor pipeline (which does symbol resolution + analysis).
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!workspaceRoot) {
+        throw new Error('No workspace root available');
+      }
+
+      const uri = vscode.Uri.file(path.join(workspaceRoot, symbol.filePath));
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const cursorContext = this._buildCursorContext(
+        doc,
+        symbol.name,
+        symbol.filePath,
+        symbol.position.line
+      );
+
+      const { symbol: resolvedSymbol, result } = await this._orchestrator.analyzeFromCursor(
+        cursorContext,
+        (stage) => {
+          const t = this._tabs.find((x) => x.id === tabId);
+          if (t && t.status === 'loading') {
+            t.loadingStage = stage;
+            this._pushState();
+          }
+        },
+        true // force — skip cache
+      );
+
+      const t = this._tabs.find((x) => x.id === tabId);
+      if (t) {
+        t.symbol = resolvedSymbol;
+        t.status = 'ready';
+        t.analysis = result;
+        delete t.loadingStage;
+        logger.info(
+          `ViewProvider._handleReAnalyze: re-analysis complete for tab ${tabId} — ` +
+            `resolved as ${resolvedSymbol.kind} "${resolvedSymbol.name}"`
+        );
+      } else {
+        logger.warn(`ViewProvider._handleReAnalyze: tab ${tabId} was removed during re-analysis`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const t = this._tabs.find((x) => x.id === tabId);
+      if (t) {
+        t.status = 'error';
+        t.error = message;
+      }
+      logger.error(`ViewProvider._handleReAnalyze: failed for "${symbol.name}": ${message}`);
     }
 
     this._pushState();
@@ -1013,10 +1099,12 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       if (!seen.has(entry.toTabId)) {
         seen.add(entry.toTabId);
         trail.push(entry.toTabId);
+        const tab = this._tabs.find((t) => t.id === entry.toTabId);
         trailSymbols.push({
           tabId: entry.toTabId,
           symbolName: entry.symbolName,
           symbolKind: entry.symbolKind,
+          symbol: tab?.symbol,
         });
       }
     }
@@ -1054,10 +1142,12 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Restore a pinned investigation — activate the first tab in the trail
-   * that is still open, and navigate through the rest.
+   * Restore a pinned investigation — replace the current tab list with
+   * exactly the investigation's tabs in the saved order.
+   * Re-uses existing tabs when they match; re-creates missing tabs from cache.
+   * Tabs not present in the investigation are removed.
    */
-  private _restoreInvestigation(investigationId: string): void {
+  private async _restoreInvestigation(investigationId: string): Promise<void> {
     const investigation = this._pinnedInvestigations.find((inv) => inv.id === investigationId);
     if (!investigation) {
       logger.warn(`ViewProvider._restoreInvestigation: investigation ${investigationId} not found`);
@@ -1069,24 +1159,77 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
     this._currentInvestigationId = investigation.id;
     this._currentInvestigationDirty = false;
 
-    // Find the first tab in the trail that still exists
-    for (const tabId of investigation.trail) {
-      const tab = this._tabs.find((t) => t.id === tabId);
-      if (tab) {
-        this._activeTabId = tabId;
-        logger.info(
-          `ViewProvider._restoreInvestigation: activated tab ${tabId} ` +
-            `"${tab.symbol.name}" from investigation "${investigation.name}"`
+    // Build the new tab list in the investigation's saved order.
+    // Re-use existing tabs when available; re-create from cache otherwise.
+    const newTabs: TabState[] = [];
+    const idMap = new Map<string, string>();
+
+    for (const ts of investigation.trailSymbols) {
+      // Check if the tab already exists in the current tab list
+      const existingTab = this._tabs.find((t) => t.id === ts.tabId);
+      if (existingTab) {
+        newTabs.push(existingTab);
+        continue;
+      }
+
+      // Tab doesn't exist — try to re-create it from cache
+      if (!ts.symbol || !this._cacheStore) {
+        continue;
+      }
+
+      try {
+        const cached = await this._cacheStore.read(ts.symbol);
+        if (!cached) {
+          logger.debug(
+            `ViewProvider._restoreInvestigation: cache miss for "${ts.symbolName}", skipping`
+          );
+          continue;
+        }
+
+        const newId = `tab-${++this._tabCounter}`;
+        idMap.set(ts.tabId, newId);
+
+        const tab: TabState = {
+          id: newId,
+          symbol: ts.symbol,
+          status: 'ready',
+          analysis: cached,
+        };
+        newTabs.push(tab);
+      } catch (err) {
+        logger.warn(
+          `ViewProvider._restoreInvestigation: failed to restore tab for ` +
+            `"${ts.symbolName}": ${err}`
         );
-        this._pushState();
-        return;
       }
     }
 
-    logger.warn(
-      `ViewProvider._restoreInvestigation: no tabs from investigation ` +
-        `"${investigation.name}" are still open`
-    );
+    if (newTabs.length > 0) {
+      // Replace the tab list with exactly the investigation's tabs
+      this._tabs = newTabs;
+      this._activeTabId = newTabs[0].id;
+
+      // Update the investigation's trail to reflect re-created tab IDs
+      if (idMap.size > 0) {
+        investigation.trail = investigation.trail.map((id) => idMap.get(id) ?? id);
+        investigation.trailSymbols = investigation.trailSymbols.map((ts) => ({
+          ...ts,
+          tabId: idMap.get(ts.tabId) ?? ts.tabId,
+        }));
+      }
+
+      logger.info(
+        `ViewProvider._restoreInvestigation: restored ${newTabs.length} tabs ` +
+          `from investigation "${investigation.name}" ` +
+          `(${idMap.size} re-created from cache)`
+      );
+      this._pushState();
+    } else {
+      logger.warn(
+        `ViewProvider._restoreInvestigation: could not restore any tabs from investigation ` +
+          `"${investigation.name}" — no cached data available`
+      );
+    }
   }
 
   // =====================
@@ -1165,6 +1308,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       tabId: t.id,
       symbolName: t.symbol.name,
       symbolKind: t.symbol.kind,
+      symbol: t.symbol,
     }));
     existing.pinnedAt = new Date().toISOString();
 
@@ -1185,6 +1329,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       tabId: t.id,
       symbolName: t.symbol.name,
       symbolKind: t.symbol.kind,
+      symbol: t.symbol,
     }));
 
     if (trail.length === 0) {

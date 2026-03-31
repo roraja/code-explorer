@@ -3,14 +3,16 @@
  *
  * Activates/deactivates the extension, wiring up all services
  * and registering VS Code contributions.
+ *
+ * Uses CodeExplorerAPI as the core engine — extension.ts is a thin
+ * VS Code adapter that gathers editor context and delegates to the API.
  */
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { EXTENSION_DISPLAY_NAME, VIEW_ID, COMMANDS } from './models/constants';
 import { CodeExplorerViewProvider } from './ui/CodeExplorerViewProvider';
+import { CodeExplorerAPI } from './api/CodeExplorerAPI';
 import { VscodeSourceReader } from './providers/VscodeSourceReader';
-import { AnalysisOrchestrator } from './analysis/AnalysisOrchestrator';
-import { CacheStore } from './cache/CacheStore';
 import { LLMProviderFactory } from './llm/LLMProviderFactory';
 import { logger, LogLevel } from './utils/logger';
 import { SkillInstaller } from './skills/SkillInstaller';
@@ -41,7 +43,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const config = vscode.workspace.getConfiguration('codeExplorer');
   const llmProviderName = config.get<string>('llmProvider', 'copilot-cli');
 
-  // --- LLM Layer ---
+  // --- LLM Provider (created separately for mock-copilot factory options) ---
   const llmProvider = LLMProviderFactory.create(
     llmProviderName,
     {
@@ -55,28 +57,20 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
 
-  // Set workspace root so the CLI provider runs with full workspace context
-  if (llmProvider.setWorkspaceRoot) {
-    llmProvider.setWorkspaceRoot(workspaceRoot);
-  }
+  // --- Public API (core engine — no vscode dependency) ---
+  const api = new CodeExplorerAPI({
+    workspaceRoot,
+    sourceReader: new VscodeSourceReader(),
+    llmProviderInstance: llmProvider,
+  });
 
-  // --- Analysis Layer ---
-  const sourceReader = new VscodeSourceReader();
-  const cacheStore = new CacheStore(workspaceRoot);
-  const orchestrator = new AnalysisOrchestrator(
-    sourceReader,
-    llmProvider,
-    cacheStore,
-    workspaceRoot
-  );
+  context.subscriptions.push({ dispose: () => api.dispose() });
 
-  context.subscriptions.push({ dispose: () => orchestrator.dispose() });
-
-  // --- UI Layer ---
+  // --- UI Layer (uses orchestrator + cache from the API) ---
   const viewProvider = new CodeExplorerViewProvider(
     context.extensionUri,
-    orchestrator,
-    cacheStore,
+    api.orchestrator,
+    api.cacheStore,
     workspaceRoot
   );
 
@@ -87,7 +81,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // --- Hover Provider ---
-  const hoverProvider = new CodeExplorerHoverProvider(cacheStore, workspaceRoot);
+  const hoverProvider = new CodeExplorerHoverProvider(api.cacheStore, workspaceRoot);
   const hoverLanguages = [
     'typescript',
     'javascript',
@@ -107,7 +101,7 @@ export function activate(context: vscode.ExtensionContext): void {
   logger.info(`Hover provider registered for ${hoverLanguages.length} languages`);
 
   // --- CodeLens Provider ---
-  const codeLensProvider = new CodeExplorerCodeLensProvider(cacheStore, workspaceRoot);
+  const codeLensProvider = new CodeExplorerCodeLensProvider(api.cacheStore, workspaceRoot);
   const codeLensLanguages = [
     'typescript',
     'javascript',
@@ -127,10 +121,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push({ dispose: () => codeLensProvider.dispose() });
   logger.info(`CodeLens provider registered for ${codeLensLanguages.length} languages`);
 
-  // --- Graph Builder ---
+  // --- Graph Builder (for webview dependency graph) ---
   const graphBuilder = new GraphBuilder(workspaceRoot);
-
-  // Make graph builder available to the view provider for webview message handling
   viewProvider.setGraphBuilder(graphBuilder);
 
   // --- Commands ---
@@ -237,7 +229,7 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         if (confirm === 'Clear') {
           try {
-            await cacheStore.clear();
+            await api.clearCache();
             logger.info('Cache cleared');
             vscode.window.showInformationMessage('Code Explorer cache cleared.');
           } catch (err) {
@@ -355,7 +347,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
         logger.info(`exploreFileSymbols: analyzing ${filePath} (${fileSource.length} chars)`);
 
-        // Show progress notification while running
+        // Show progress notification while running — delegates to api.exploreFile()
         await vscode.window.withProgress(
           {
             location: vscode.ProgressLocation.Notification,
@@ -364,7 +356,7 @@ export function activate(context: vscode.ExtensionContext): void {
           },
           async (progress) => {
             try {
-              const cachedCount = await orchestrator.analyzeFile(
+              const cachedCount = await api.exploreFile(
                 filePath,
                 fileSource,
                 (stage, detail) => {
@@ -559,17 +551,17 @@ export function activate(context: vscode.ExtensionContext): void {
           },
           async () => {
             try {
-              // Default to a focused subgraph around the current symbol
+              // Use API for graph building
               let graph;
               if (cursorWord && cursorFilePath) {
-                graph = await graphBuilder.buildSubgraph(cursorWord, cursorFilePath);
+                graph = await api.buildSubgraph(cursorWord, cursorFilePath);
                 // Fall back to full graph if subgraph is empty (symbol not cached)
                 if (graph.nodes.length === 0) {
                   logger.info('showDependencyGraph: subgraph empty, falling back to full graph');
-                  graph = await graphBuilder.buildGraph();
+                  graph = await api.buildDependencyGraph();
                 }
               } else {
-                graph = await graphBuilder.buildGraph();
+                graph = await api.buildDependencyGraph();
               }
 
               const centerId =
@@ -577,7 +569,7 @@ export function activate(context: vscode.ExtensionContext): void {
                   ? graph.nodes.find((n) => n.name === cursorWord && n.filePath === cursorFilePath)
                       ?.id
                   : undefined;
-              const mermaidSource = GraphBuilder.toMermaid(graph, centerId);
+              const mermaidSource = api.toMermaid(graph, centerId);
               viewProvider.showDependencyGraph(
                 mermaidSource,
                 graph.nodes.length,

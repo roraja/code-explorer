@@ -20,19 +20,22 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Extension activation, command wiring, DI setup     | `src/CONTEXT.md`                            | `src/extension.ts`                                    |
 | **Public API, standalone usage, CLI, tests**       | `src/api/CONTEXT.md`                        | `src/api/CodeExplorerAPI.ts`, `src/api/ISourceReader.ts`, `src/api/ILogger.ts` |
 | Symbol resolution at cursor (legacy, not primary)  | `src/providers/CONTEXT.md`                  | `src/providers/SymbolResolver.ts`, `src/providers/VscodeSourceReader.ts` |
+| Hover cards, CodeLens, diagnostic commands         | `src/providers/CONTEXT.md`                  | `src/providers/CodeExplorerHoverProvider.ts`, `src/providers/CodeExplorerCodeLensProvider.ts`, `src/providers/ShowSymbolInfoCommand.ts` |
 | Analysis pipeline, orchestration, static analysis  | `src/analysis/CONTEXT.md`                   | `src/analysis/AnalysisOrchestrator.ts`, `src/analysis/StaticAnalyzer.ts` |
-| LLM providers, CLI spawning, prompt building       | `src/llm/CONTEXT.md`                        | `src/llm/CopilotCLIProvider.ts`, `src/llm/MaiClaudeProvider.ts`, `src/llm/PromptBuilder.ts` |
+| LLM providers, CLI spawning, prompt building       | `src/llm/CONTEXT.md`                        | `src/llm/CopilotCLIProvider.ts`, `src/llm/MaiClaudeProvider.ts`, `src/llm/BuildServiceProvider.ts`, `src/llm/PromptBuilder.ts` |
 | Prompt strategies for different symbol kinds       | `src/llm/prompts/CONTEXT.md`               | `src/llm/prompts/*.ts`                                |
 | LLM response parsing                              | `src/llm/CONTEXT.md`                        | `src/llm/ResponseParser.ts`                           |
 | Markdown cache read/write/serialization            | `src/cache/CONTEXT.md`                      | `src/cache/CacheStore.ts`, `src/cache/CacheWriter.ts` |
-| Sidebar webview, tab state, message routing        | `src/ui/CONTEXT.md`                         | `src/ui/CodeExplorerViewProvider.ts`                  |
+| Sidebar webview, tab state, message routing        | `src/ui/CONTEXT.md`                         | `src/ui/CodeExplorerViewProvider.ts`, `src/ui/TabSessionStore.ts` |
 | Types, interfaces, error hierarchy, constants      | `src/models/CONTEXT.md`                     | `src/models/types.ts`, `src/models/errors.ts`, `src/models/constants.ts` |
-| Logger, CLI runner utility                         | `src/utils/CONTEXT.md`                      | `src/utils/logger.ts`, `src/utils/cli.ts`             |
+| Logger, CLI runner, symbol helpers                 | `src/utils/CONTEXT.md`                      | `src/utils/logger.ts`, `src/utils/cli.ts`, `src/utils/symbolHelpers.ts` |
 | Webview UI rendering (browser-side)                | `webview/CONTEXT.md`                        | `webview/src/main.ts`, `webview/src/styles/main.css`  |
 | Tests (unit, integration, API)                     | `test/CONTEXT.md`                           | `test/unit/**/*.test.ts`                              |
 | **CLI tool (standalone)**                          | `src/cli/CONTEXT.md`                        | `src/cli/code-explorer-cli.ts`                        |
 | Global skill installation (Claude + Copilot)       | `src/skills/CONTEXT.md`                     | `src/skills/SkillInstaller.ts`                        |
-| ADO content sync (pull/push)                       | `src/git/CONTEXT.md`                        | `src/git/AdoSync.ts`                                  |
+| ADO content sync (pull/push, content + upstream)   | `src/git/CONTEXT.md`                        | `src/git/AdoSync.ts`                                  |
+| **Dependency graph building + rendering**          | `src/graph/CONTEXT.md`                      | `src/graph/GraphBuilder.ts`                           |
+| **Tree-sitter indexing, symbol addresses**         | `src/indexing/CONTEXT.md`                   | `src/indexing/SymbolAddress.ts`, `src/indexing/SymbolIndex.ts`, `src/indexing/TreeSitterParser.ts` |
 
 ## Key Features (Current State)
 
@@ -44,8 +47,14 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Cursor-based cache lookup (fuzzy match) | Implemented | `CacheStore.ts` (`findByCursor`) |
 | LLM-assisted cache fallback (smart match) | Implemented | `CacheStore.ts` (`findByCursorWithLLMFallback`, `listCachedSymbols`) |
 | Sidebar webview with tabs      | Implemented | `CodeExplorerViewProvider.ts`, `webview/`      |
+| Tab session persistence (survive reloads) | Implemented | `TabSessionStore.ts`, `CodeExplorerViewProvider.ts` |
+| Navigation history + breadcrumbs | Implemented | `CodeExplorerViewProvider.ts`, `webview/main.ts` |
+| Pinned investigations          | Implemented | `CodeExplorerViewProvider.ts`, `webview/main.ts` |
+| Tab reordering + notes         | Implemented | `CodeExplorerViewProvider.ts`, `webview/main.ts` |
 | LLM analysis (copilot-cli)     | Implemented | `CopilotCLIProvider.ts`, `cli.ts`             |
 | LLM analysis (mai-claude)      | Implemented | `MaiClaudeProvider.ts`, `cli.ts`              |
+| LLM analysis (build-service, HTTP) | Implemented | `BuildServiceProvider.ts`                   |
+| LLM analysis (mock-copilot, testing) | Implemented | `MockCopilotProvider.ts`                   |
 | Null/disabled LLM provider     | Implemented | `NullProvider.ts`                             |
 | Prompt strategies (function, class, variable, property) | Implemented | `src/llm/prompts/`  |
 | Unified prompt (symbol resolution + analysis in one LLM call) | Implemented | `PromptBuilder.ts` (`buildUnified`) |
@@ -66,27 +75,32 @@ Only load additional contexts if the task clearly spans multiple modules.
 | Markdown cache (read/write)    | Implemented | `CacheStore.ts`                               |
 | Dual logging (OutputChannel + file) | Implemented | `logger.ts`                              |
 | LLM call logging (per-call markdown files) | Implemented | `logger.ts`                       |
+| Per-command log files          | Implemented | `logger.ts` (`startCommandLog`, `endCommandLog`) |
 | Clear Cache command            | Implemented | `extension.ts`, `CacheStore.ts`               |
 | Symbol linking (click-to-explore from webview) | Implemented | `CodeExplorerViewProvider.ts`, `webview/main.ts` |
 | Navigate-to-source from webview | Implemented | `CodeExplorerViewProvider.ts`                |
 | Scope-chain-based tab deduplication | Implemented | `CodeExplorerViewProvider.ts`            |
 | Workspace-context CLI execution (cwd) | Implemented | `cli.ts`, `CopilotCLIProvider.ts`, `MaiClaudeProvider.ts` |
 | Install Global Skills command  | Implemented | `extension.ts`, `SkillInstaller.ts`            |
-| ADO content sync (pull/push)   | Implemented | `extension.ts`, `AdoSync.ts`                   |
+| ADO content sync (pull/push, content + upstream) | Implemented | `extension.ts`, `AdoSync.ts`     |
 | **Public API (VS-Code-free)**  | Implemented | `CodeExplorerAPI.ts`, `ISourceReader.ts`, `ILogger.ts` |
 | **CLI tool (standalone)**      | Implemented | `src/cli/code-explorer-cli.ts`                 |
 | **FileSystemSourceReader**     | Implemented | `src/api/FileSystemSourceReader.ts`            |
 | **VscodeSourceReader**         | Implemented | `src/providers/VscodeSourceReader.ts`           |
-| **API integration tests (no VS Code)** | Implemented | `test/unit/api/*.test.ts` (23 tests)   |
+| **API integration tests (no VS Code)** | Implemented | `test/unit/api/*.test.ts`              |
+| **Hover cards (cached analysis on hover)** | Implemented | `CodeExplorerHoverProvider.ts`      |
+| **CodeLens (inline annotations)** | Implemented | `CodeExplorerCodeLensProvider.ts`           |
+| **Show Symbol Info command (diagnostic)** | Implemented | `ShowSymbolInfoCommand.ts`            |
+| **Dependency graph (cache-based)** | Implemented | `GraphBuilder.ts`, `CodeExplorerAPI.ts`, `CodeExplorerViewProvider.ts` |
+| **Tree-sitter symbol indexing** | Implemented | `src/indexing/SymbolAddress.ts`, `SymbolIndex.ts`, `TreeSitterParser.ts`, extractors |
 | Legacy SymbolResolver (VS Code API) | Preserved (not primary) | `SymbolResolver.ts` (not imported by `extension.ts`) |
 | **CacheManager/IndexManager**  | Not implemented | Planned in `src/cache/`                   |
 | **AnalysisQueue with priority** | Not implemented | Planned in `src/analysis/`               |
 | **BackgroundScheduler**        | Not implemented | Planned                                   |
-| **HoverProvider**              | Not implemented | Planned                                   |
-| **CodeLensProvider**           | Not implemented | Planned                                   |
 | **MCP server**                 | Not implemented | Planned in `src/mcp/`                     |
 | **File watcher invalidation**  | Not implemented | Planned                                   |
 | **Analyze Workspace command**  | Stub only | `extension.ts` (shows "future release" message)  |
+| **Tree-sitter ↔ Orchestrator integration** | Not implemented | Planned (Phase 2)            |
 
 ## Data Flow
 
@@ -110,6 +124,8 @@ User clicks symbol -> Ctrl+Shift+E
           -> CacheStore.write() (persists result as markdown)
           -> Pre-cache related symbols (if any discovered)
         -> posts 'setState' to webview (renders analysis tabs + sections)
+        -> Records navigation history entry
+        -> Saves tab session to disk (TabSessionStore)
         -> webview renders mermaid diagrams asynchronously
         -> webview auto-links symbol names in analysis text
 ```
@@ -154,6 +170,21 @@ CodeExplorerAPI constructed with FileSystemSourceReader + LLMProvider
       -> CacheStore (same disk cache format)
 ```
 
+Dependency graph flow:
+
+```
+User runs "Show Dependency Graph" command
+  -> extension.ts: SHOW_DEPENDENCY_GRAPH handler
+    -> api.buildSubgraph(word, filePath) or api.buildDependencyGraph()
+      -> GraphBuilder.buildGraph() / buildSubgraph()
+        -> Scans all .md cache files recursively
+        -> Parses YAML frontmatter + json:callers/subfunctions blocks
+        -> Builds GraphNode[] + GraphEdge[] (calls, dependsOn, extends, implements, uses)
+    -> api.toMermaid(graph, centerId) -> Mermaid flowchart string
+    -> viewProvider.showDependencyGraph(mermaidSource, nodeCount, edgeCount)
+      -> posts 'showDependencyGraph' to webview
+```
+
 ## Build & Dev
 
 ```bash
@@ -196,3 +227,8 @@ CLI usage: `npm run cli -- read-cache --workspace . --file src/extension.ts --sy
 | Symbol resolved as 'unknown' | LLM did not return `json:symbol_identity` block; check prompt and response in LLM call log |
 | Mermaid diagram not rendering | Check CSP allows `'unsafe-inline'` for styles (mermaid injects inline CSS); check browser console for mermaid errors |
 | Enhance Q&A not persisting | Check `CacheStore.write()` — Q&A history is serialized as `json:qa_history` block |
+| Tabs lost on reload | Check `TabSessionStore` — session saved to `.vscode/code-explorer-logs/tab-session.json` |
+| Build service returns empty | Check the `output_files` collection — agent must write to `{{output_folder}}/analysis.md` |
+| Hover cards not showing | Check `codeExplorer.showHoverCards` setting (default: true) and that the symbol is cached |
+| CodeLens not appearing | Check `codeExplorer.showCodeLens` setting (default: false — disabled by default) |
+| Dependency graph empty | Need at least some cached analyses — run "Explore Symbol" or "Explore File Symbols" first |

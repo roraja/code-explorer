@@ -348,14 +348,16 @@ export class AnalysisOrchestrator {
    *
    * @param cursor    Raw cursor context (word, file, surrounding source)
    * @param onProgress  Optional callback invoked when the analysis stage changes
+   * @param force     Skip the cache and re-analyze from scratch.
    */
   async analyzeFromCursor(
     cursor: CursorContext,
-    onProgress?: AnalysisProgressCallback
+    onProgress?: AnalysisProgressCallback,
+    force = false
   ): Promise<{ symbol: SymbolInfo; result: AnalysisResult }> {
     const startTime = Date.now();
     const cursorKey = `"${cursor.word}" in ${cursor.filePath}:${cursor.position.line}`;
-    logger.info(`Orchestrator.analyzeFromCursor: ${cursorKey}`);
+    logger.info(`Orchestrator.analyzeFromCursor: ${cursorKey}${force ? ' (forced)' : ''}`);
 
     // Start LLM call log
     logger.startLLMCallLog(cursor.word, this._llmProvider.name);
@@ -363,6 +365,13 @@ export class AnalysisOrchestrator {
 
     // Track addresses that missed so we can promote the cache file if a later tier hits
     const missedAddresses: string[] = [];
+
+    if (force) {
+      logger.logLLMStep('FORCE mode — skipping all cache tiers, going straight to LLM analysis.');
+    }
+
+    // 1–3. Cache tiers — skip entirely when force=true (re-analyze)
+    if (!force) {
 
     // 1. TIER 1: Try VS Code static analysis to resolve symbol (fast, deterministic, no LLM)
     //    Uses definition provider + document symbol provider to get name, kind, scope chain.
@@ -560,6 +569,8 @@ export class AnalysisOrchestrator {
       logger.logLLMStep(`TIER 3 ERROR during cursor scan: ${err}. Treating as cache miss.`);
       logger.debug(`Orchestrator: cache findByCursorWithLLMFallback error: ${err}`);
     }
+
+    } // end if (!force) — cache tiers
 
     // 2. Build unified prompt (resolution + analysis in one call)
     onProgress?.('resolving-symbol');

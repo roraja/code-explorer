@@ -60,6 +60,19 @@ interface NavigationHistoryState {
   currentInvestigationDirty: boolean;
 }
 
+/** A node in the tab group tree (tab reference or nested group) */
+type TabTreeNode =
+  | { type: 'tab'; tabId: string }
+  | { type: 'group'; group: TabGroup };
+
+/** Named group of tabs — supports nesting */
+interface TabGroup {
+  id: string;
+  name: string;
+  children: TabTreeNode[];
+  collapsed: boolean;
+}
+
 const LOADING_STAGE_LABELS: Record<string, string> = {
   'resolving-symbol': 'Identifying symbol\u2026',
   'cache-check': 'Checking cache\u2026',
@@ -83,6 +96,13 @@ let _graphNodeCount = 0;
 let _graphEdgeCount = 0;
 /** Current tab search filter text (case-insensitive) */
 let _tabSearchFilter = '';
+/** Tab groups for tree-wise grouping */
+let _tabGroups: TabGroup[] = [];
+/** Set of currently selected tab IDs (for multi-select) */
+const _selectedTabIds: Set<string> = new Set();
+/** Currently dragged item info */
+let _draggedTabId: string | null = null;
+let _draggedGroupId: string | null = null;
 
 function log(msg: string): void {
   console.log(`[CE] ${msg}`);
@@ -132,13 +152,15 @@ function init(): void {
     tabs: Tab[];
     activeTabId: string | null;
     navigationHistory?: NavigationHistoryState;
+    tabGroups?: TabGroup[];
   } | null;
   if (saved && saved.tabs) {
     currentTabs = saved.tabs;
     currentActiveTabId = saved.activeTabId;
     currentNavHistory = saved.navigationHistory || null;
+    _tabGroups = saved.tabGroups || [];
     log(
-      `restored saved state: ${currentTabs.length} tabs, history=${currentNavHistory?.entries.length ?? 0} entries`
+      `restored saved state: ${currentTabs.length} tabs, history=${currentNavHistory?.entries.length ?? 0} entries, groups=${_tabGroups.length}`
     );
   }
 
@@ -150,14 +172,16 @@ function init(): void {
       currentTabs = msg.tabs || [];
       currentActiveTabId = msg.activeTabId;
       currentNavHistory = msg.navigationHistory || null;
+      _tabGroups = msg.tabGroups || [];
       log(
-        `setState: ${currentTabs.length} tabs, active=${currentActiveTabId}, history=${currentNavHistory?.entries.length ?? 0} entries`
+        `setState: ${currentTabs.length} tabs, active=${currentActiveTabId}, history=${currentNavHistory?.entries.length ?? 0} entries, groups=${_tabGroups.length}`
       );
       // Persist for webview re-creation
       vscode.setState({
         tabs: currentTabs,
         activeTabId: currentActiveTabId,
         navigationHistory: currentNavHistory,
+        tabGroups: _tabGroups,
       });
       // If a graph is showing and tabs come in, keep showing tabs
       if (_showingGraph) {
@@ -274,47 +298,30 @@ function renderTabBar(): string {
     <input class="tab-search__input" id="tab-search-input" type="text" placeholder="Filter tabs\u2026" value="${escAttr(_tabSearchFilter)}" />
   </div>`;
 
-  // Tab list (draggable, in display order — newest first)
-  // Apply search filter (case-insensitive match on symbol name, kind, file path, scope chain)
-  const filterText = _tabSearchFilter.toLowerCase();
-  const filteredTabs = filterText
-    ? currentTabs.filter((tab) => {
-        const name = tab.symbol.name.toLowerCase();
-        const kind = tab.symbol.kind.toLowerCase();
-        const file = tab.symbol.filePath.toLowerCase();
-        const scope = (tab.symbol.scopeChain || []).join('.').toLowerCase();
-        return (
-          name.includes(filterText) ||
-          kind.includes(filterText) ||
-          file.includes(filterText) ||
-          scope.includes(filterText)
-        );
-      })
-    : currentTabs;
+  // Group action bar (create group from selection)
+  const hasSelection = _selectedTabIds.size > 0;
+  const groupActions = `<div class="tab-group-actions">
+    <button class="tab-group-actions__btn" id="create-group-btn" title="Group selected tabs" ${hasSelection ? '' : 'disabled'}>\uD83D\uDCC1 Group${hasSelection ? ` (${_selectedTabIds.size})` : ''}</button>
+  </div>`;
 
-  const tabs = filteredTabs
-    .map((tab, index) => {
-      const active = tab.id === currentActiveTabId ? ' tab--active' : '';
-      const icon = kindIcon(tab.symbol.kind);
-      const statusDot =
-        tab.status === 'loading'
-          ? '<span class="tab__status tab__status--loading">\u27F3</span>'
-          : tab.status === 'error'
-            ? '<span class="tab__status tab__status--error">\u2715</span>'
-            : '';
-      // Show scope context in tab label for nested symbols (e.g., "getUser \u203A result")
-      const scope =
-        tab.symbol.scopeChain && tab.symbol.scopeChain.length > 0
-          ? tab.symbol.scopeChain[tab.symbol.scopeChain.length - 1] + ' \u203A '
-          : '';
-      const position = index + 1;
-      return `<div class="tab${active}" data-tab-id="${tab.id}" draggable="true">
-        <span class="tab__position">${position}</span>
-        <span class="tab__icon">${icon}</span>
-        <span class="tab__label" title="${esc((tab.symbol.scopeChain || []).concat(tab.symbol.name).join('.'))}">${esc(scope)}${esc(tab.symbol.name)}</span>
-        ${statusDot}
-        <span class="tab__close" data-close-id="${tab.id}">\u00D7</span>
-      </div>`;
+  // Build the tab tree: grouped tabs + ungrouped tabs
+  const filterText = _tabSearchFilter.toLowerCase();
+  const groupedTabIds = _collectGroupedTabIds(_tabGroups);
+  const ungroupedTabs = currentTabs.filter((t) => !groupedTabIds.has(t.id));
+
+  // Render groups
+  const groupsHtml = _tabGroups.map((g) => _renderGroup(g, 0, filterText)).join('');
+
+  // Render ungrouped tabs
+  const filteredUngrouped = filterText
+    ? ungroupedTabs.filter((tab) => _tabMatchesFilter(tab, filterText))
+    : ungroupedTabs;
+
+  const positionCounter = { value: _countVisibleTabsInGroups(_tabGroups, filterText) };
+  const ungroupedHtml = filteredUngrouped
+    .map((tab) => {
+      positionCounter.value++;
+      return _renderTabItem(tab, positionCounter.value);
     })
     .join('');
 
@@ -343,12 +350,162 @@ function renderTabBar(): string {
   return `<div class="tab-bar">
     ${invHeader}
     ${searchBox}
+    ${groupActions}
     <div class="tab-bar__divider"></div>
-    <div class="tab-bar__tabs" id="tab-list">${tabs}</div>
+    <div class="tab-bar__tabs" id="tab-list">
+      ${groupsHtml}
+      ${ungroupedHtml}
+    </div>
     <div class="tab-bar__divider"></div>
     <div class="tab-bar__section-label">Saved Investigations</div>
     <div class="tab-bar__investigations">${invListHtml}</div>
   </div>`;
+}
+
+/**
+ * Render a single tab item (used both inside groups and ungrouped).
+ */
+function _renderTabItem(tab: Tab, position: number, indent: number = 0): string {
+  const active = tab.id === currentActiveTabId ? ' tab--active' : '';
+  const selected = _selectedTabIds.has(tab.id) ? ' tab--selected' : '';
+  const icon = kindIcon(tab.symbol.kind);
+  const statusDot =
+    tab.status === 'loading'
+      ? '<span class="tab__status tab__status--loading">\u27F3</span>'
+      : tab.status === 'error'
+        ? '<span class="tab__status tab__status--error">\u2715</span>'
+        : '';
+  const scope =
+    tab.symbol.scopeChain && tab.symbol.scopeChain.length > 0
+      ? tab.symbol.scopeChain[tab.symbol.scopeChain.length - 1] + ' \u203A '
+      : '';
+  const indentPx = indent * 16;
+  return `<div class="tab${active}${selected}" data-tab-id="${tab.id}" draggable="true" style="padding-left: ${8 + indentPx}px;">
+    <span class="tab__select" data-select-id="${tab.id}"></span>
+    <span class="tab__position">${position}</span>
+    <span class="tab__icon">${icon}</span>
+    <span class="tab__label" title="${esc((tab.symbol.scopeChain || []).concat(tab.symbol.name).join('.'))}">${esc(scope)}${esc(tab.symbol.name)}</span>
+    ${statusDot}
+    <span class="tab__close" data-close-id="${tab.id}">\u00D7</span>
+  </div>`;
+}
+
+/**
+ * Render a group header and its children (recursive for nesting).
+ */
+function _renderGroup(group: TabGroup, depth: number, filterText: string): string {
+  const indentPx = depth * 16;
+  const chevron = group.collapsed ? '\u25B6' : '\u25BC';
+  const childCount = _countTabsInGroup(group);
+
+  // Render children (unless collapsed)
+  let childrenHtml = '';
+  if (!group.collapsed) {
+    const counter = { value: 0 };
+    childrenHtml = group.children
+      .map((child) => {
+        if (child.type === 'tab') {
+          const tab = currentTabs.find((t) => t.id === child.tabId);
+          if (!tab) {
+            return '';
+          }
+          if (filterText && !_tabMatchesFilter(tab, filterText)) {
+            return '';
+          }
+          counter.value++;
+          return _renderTabItem(tab, counter.value, depth + 1);
+        }
+        // Nested group
+        return _renderGroup(child.group, depth + 1, filterText);
+      })
+      .join('');
+  }
+
+  return `<div class="tab-group" data-group-id="${group.id}" style="padding-left: ${indentPx}px;">
+    <div class="tab-group__header" data-group-id="${group.id}" draggable="true">
+      <span class="tab-group__chevron" data-toggle-group="${group.id}">${chevron}</span>
+      <span class="tab-group__name" data-group-id="${group.id}" title="${escAttr(group.name)}">${esc(group.name)}</span>
+      <span class="tab-group__count">${childCount}</span>
+      <span class="tab-group__rename" data-rename-group="${group.id}" title="Rename">\u270E</span>
+      <span class="tab-group__delete" data-delete-group="${group.id}" title="Delete group">\u00D7</span>
+    </div>
+    <div class="tab-group__children" data-group-children="${group.id}">
+      ${childrenHtml}
+    </div>
+  </div>`;
+}
+
+/**
+ * Collect all tab IDs that are inside any group (recursively).
+ */
+function _collectGroupedTabIds(groups: TabGroup[]): Set<string> {
+  const ids = new Set<string>();
+  for (const g of groups) {
+    for (const child of g.children) {
+      if (child.type === 'tab') {
+        ids.add(child.tabId);
+      } else {
+        for (const id of _collectGroupedTabIds([child.group])) {
+          ids.add(id);
+        }
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * Count the number of tabs inside a group (including nested groups).
+ */
+function _countTabsInGroup(group: TabGroup): number {
+  let count = 0;
+  for (const child of group.children) {
+    if (child.type === 'tab') {
+      count++;
+    } else {
+      count += _countTabsInGroup(child.group);
+    }
+  }
+  return count;
+}
+
+/**
+ * Count visible tabs in groups (for position numbering).
+ */
+function _countVisibleTabsInGroups(groups: TabGroup[], filterText: string): number {
+  let count = 0;
+  for (const g of groups) {
+    if (g.collapsed) {
+      continue;
+    }
+    for (const child of g.children) {
+      if (child.type === 'tab') {
+        const tab = currentTabs.find((t) => t.id === child.tabId);
+        if (tab && (!filterText || _tabMatchesFilter(tab, filterText))) {
+          count++;
+        }
+      } else {
+        count += _countVisibleTabsInGroups([child.group], filterText);
+      }
+    }
+  }
+  return count;
+}
+
+/**
+ * Check if a tab matches the search filter.
+ */
+function _tabMatchesFilter(tab: Tab, filterText: string): boolean {
+  const name = tab.symbol.name.toLowerCase();
+  const kind = tab.symbol.kind.toLowerCase();
+  const file = tab.symbol.filePath.toLowerCase();
+  const scope = (tab.symbol.scopeChain || []).join('.').toLowerCase();
+  return (
+    name.includes(filterText) ||
+    kind.includes(filterText) ||
+    file.includes(filterText) ||
+    scope.includes(filterText)
+  );
 }
 
 function renderContent(tab: Tab): string {
@@ -1330,33 +1487,38 @@ function _attachResizeHandle(): void {
 // Drag and Drop (Tab Reordering)
 // =====================
 
-let _draggedTabId: string | null = null;
-
 function _attachDragAndDrop(): void {
   const tabList = document.getElementById('tab-list');
   if (!tabList) {
     return;
   }
 
+  // Clear all drop indicators
+  const _clearDropIndicators = (): void => {
+    tabList.querySelectorAll('.tab--drop-above, .tab--drop-below, .tab-group--drop-into, .tab-group--drop-above, .tab-group--drop-below').forEach((t) => {
+      t.classList.remove('tab--drop-above', 'tab--drop-below', 'tab-group--drop-into', 'tab-group--drop-above', 'tab-group--drop-below');
+    });
+  };
+
+  // --- Tab drag-and-drop ---
   tabList.querySelectorAll('.tab[draggable="true"]').forEach((el) => {
     el.addEventListener('dragstart', (e) => {
       const de = e as DragEvent;
       const tabEl = de.currentTarget as HTMLElement;
       _draggedTabId = tabEl.dataset.tabId || null;
+      _draggedGroupId = null;
       tabEl.classList.add('tab--dragging');
       if (de.dataTransfer) {
         de.dataTransfer.effectAllowed = 'move';
-        de.dataTransfer.setData('text/plain', _draggedTabId || '');
+        de.dataTransfer.setData('text/plain', `tab:${_draggedTabId || ''}`);
       }
     });
 
     el.addEventListener('dragend', () => {
       (el as HTMLElement).classList.remove('tab--dragging');
       _draggedTabId = null;
-      // Remove all drop indicators
-      tabList.querySelectorAll('.tab--drop-above, .tab--drop-below').forEach((t) => {
-        t.classList.remove('tab--drop-above', 'tab--drop-below');
-      });
+      _draggedGroupId = null;
+      _clearDropIndicators();
     });
 
     el.addEventListener('dragover', (e) => {
@@ -1368,10 +1530,7 @@ function _attachDragAndDrop(): void {
       const target = de.currentTarget as HTMLElement;
       const rect = target.getBoundingClientRect();
       const midY = rect.top + rect.height / 2;
-      // Remove indicators from siblings
-      tabList.querySelectorAll('.tab--drop-above, .tab--drop-below').forEach((t) => {
-        t.classList.remove('tab--drop-above', 'tab--drop-below');
-      });
+      _clearDropIndicators();
       if (de.clientY < midY) {
         target.classList.add('tab--drop-above');
       } else {
@@ -1388,34 +1547,211 @@ function _attachDragAndDrop(): void {
       de.preventDefault();
       const target = de.currentTarget as HTMLElement;
       const targetId = target.dataset.tabId;
-      target.classList.remove('tab--drop-above', 'tab--drop-below');
+      _clearDropIndicators();
 
-      if (!_draggedTabId || !targetId || _draggedTabId === targetId) {
+      if (!targetId) {
         return;
       }
 
-      // Compute new order: tabs are now stored and displayed in the same order
-      // (display order = storage order), so we work directly with tab IDs.
-      const tabOrder = currentTabs.map((t) => t.id);
-      const fromIdx = tabOrder.indexOf(_draggedTabId);
-      const toIdx = tabOrder.indexOf(targetId);
-      if (fromIdx < 0 || toIdx < 0) {
+      if (_draggedTabId && _draggedTabId !== targetId) {
+        // Tab dropped on tab — reorder
+        const tabOrder = currentTabs.map((t) => t.id);
+        const fromIdx = tabOrder.indexOf(_draggedTabId);
+        const toIdx = tabOrder.indexOf(targetId);
+        if (fromIdx < 0 || toIdx < 0) {
+          return;
+        }
+        const rect = target.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        let insertIdx = de.clientY < midY ? toIdx : toIdx + 1;
+        if (fromIdx < insertIdx) {
+          insertIdx--;
+        }
+        tabOrder.splice(fromIdx, 1);
+        tabOrder.splice(insertIdx, 0, _draggedTabId);
+        vscode.postMessage({ type: 'reorderTabs', tabIds: tabOrder });
+      } else if (_draggedGroupId) {
+        // Group dropped on a tab — move group to root level near this tab
+        vscode.postMessage({
+          type: 'moveGroupToGroup',
+          sourceGroupId: _draggedGroupId,
+          targetGroupId: null,
+        });
+      }
+    });
+  });
+
+  // --- Group header drag-and-drop ---
+  tabList.querySelectorAll('.tab-group__header[draggable="true"]').forEach((el) => {
+    el.addEventListener('dragstart', (e) => {
+      const de = e as DragEvent;
+      const groupEl = de.currentTarget as HTMLElement;
+      _draggedGroupId = groupEl.dataset.groupId || null;
+      _draggedTabId = null;
+      groupEl.classList.add('tab-group__header--dragging');
+      if (de.dataTransfer) {
+        de.dataTransfer.effectAllowed = 'move';
+        de.dataTransfer.setData('text/plain', `group:${_draggedGroupId || ''}`);
+      }
+    });
+
+    el.addEventListener('dragend', () => {
+      (el as HTMLElement).classList.remove('tab-group__header--dragging');
+      _draggedGroupId = null;
+      _draggedTabId = null;
+      _clearDropIndicators();
+    });
+
+    el.addEventListener('dragover', (e) => {
+      const de = e as DragEvent;
+      de.preventDefault();
+      if (de.dataTransfer) {
+        de.dataTransfer.dropEffect = 'move';
+      }
+      const target = de.currentTarget as HTMLElement;
+      const targetGroupId = target.dataset.groupId;
+      _clearDropIndicators();
+
+      // Can't drop a group onto itself
+      if (_draggedGroupId && _draggedGroupId === targetGroupId) {
         return;
       }
 
-      // Determine whether to place above or below
       const rect = target.getBoundingClientRect();
-      const midY = rect.top + rect.height / 2;
-      let insertIdx = de.clientY < midY ? toIdx : toIdx + 1;
-      if (fromIdx < insertIdx) {
-        insertIdx--;
+      const thirdHeight = rect.height / 3;
+      const relY = de.clientY - rect.top;
+
+      const groupContainer = target.closest('.tab-group');
+      if (!groupContainer) {
+        return;
       }
 
-      // Reorder and send to extension
-      tabOrder.splice(fromIdx, 1);
-      tabOrder.splice(insertIdx, 0, _draggedTabId);
+      if (relY < thirdHeight) {
+        // Top third — drop above
+        (groupContainer as HTMLElement).classList.add('tab-group--drop-above');
+      } else if (relY > thirdHeight * 2) {
+        // Bottom third — drop below
+        (groupContainer as HTMLElement).classList.add('tab-group--drop-below');
+      } else {
+        // Middle — drop into group
+        (groupContainer as HTMLElement).classList.add('tab-group--drop-into');
+      }
+    });
 
-      vscode.postMessage({ type: 'reorderTabs', tabIds: tabOrder });
+    el.addEventListener('dragleave', (e) => {
+      const target = (e as DragEvent).currentTarget as HTMLElement;
+      const groupContainer = target.closest('.tab-group');
+      if (groupContainer) {
+        groupContainer.classList.remove('tab-group--drop-into', 'tab-group--drop-above', 'tab-group--drop-below');
+      }
+    });
+
+    el.addEventListener('drop', (e) => {
+      const de = e as DragEvent;
+      de.preventDefault();
+      de.stopPropagation();
+      const target = de.currentTarget as HTMLElement;
+      const targetGroupId = target.dataset.groupId;
+      _clearDropIndicators();
+
+      if (!targetGroupId) {
+        return;
+      }
+
+      const rect = target.getBoundingClientRect();
+      const thirdHeight = rect.height / 3;
+      const relY = de.clientY - rect.top;
+      const dropInto = relY >= thirdHeight && relY <= thirdHeight * 2;
+
+      if (_draggedTabId) {
+        if (dropInto) {
+          // Tab dropped INTO a group
+          const tabIds = _selectedTabIds.size > 0 && _selectedTabIds.has(_draggedTabId)
+            ? Array.from(_selectedTabIds)
+            : [_draggedTabId];
+          vscode.postMessage({
+            type: 'moveToGroup',
+            tabIds,
+            groupId: targetGroupId,
+          });
+          _selectedTabIds.clear();
+        } else {
+          // Tab dropped above/below a group — ungroup it (move to root)
+          vscode.postMessage({
+            type: 'moveToGroup',
+            tabIds: [_draggedTabId],
+            groupId: null,
+          });
+        }
+      } else if (_draggedGroupId && _draggedGroupId !== targetGroupId) {
+        if (dropInto) {
+          // Group dropped INTO another group (nesting)
+          vscode.postMessage({
+            type: 'moveGroupToGroup',
+            sourceGroupId: _draggedGroupId,
+            targetGroupId: targetGroupId,
+          });
+        } else {
+          // Group dropped above/below — reorder at same level (move to root for now)
+          vscode.postMessage({
+            type: 'moveGroupToGroup',
+            sourceGroupId: _draggedGroupId,
+            targetGroupId: null,
+          });
+        }
+      }
+    });
+  });
+
+  // --- Group children area: accept drops into the group ---
+  tabList.querySelectorAll('.tab-group__children').forEach((el) => {
+    el.addEventListener('dragover', (e) => {
+      const de = e as DragEvent;
+      de.preventDefault();
+      if (de.dataTransfer) {
+        de.dataTransfer.dropEffect = 'move';
+      }
+      const target = de.currentTarget as HTMLElement;
+      const groupContainer = target.closest('.tab-group');
+      if (groupContainer) {
+        _clearDropIndicators();
+        (groupContainer as HTMLElement).classList.add('tab-group--drop-into');
+      }
+    });
+
+    el.addEventListener('dragleave', (e) => {
+      const target = (e as DragEvent).currentTarget as HTMLElement;
+      const groupContainer = target.closest('.tab-group');
+      if (groupContainer) {
+        groupContainer.classList.remove('tab-group--drop-into');
+      }
+    });
+
+    el.addEventListener('drop', (e) => {
+      const de = e as DragEvent;
+      de.preventDefault();
+      de.stopPropagation();
+      const target = de.currentTarget as HTMLElement;
+      const groupId = target.dataset.groupChildren;
+      _clearDropIndicators();
+
+      if (!groupId) {
+        return;
+      }
+
+      if (_draggedTabId) {
+        const tabIds = _selectedTabIds.size > 0 && _selectedTabIds.has(_draggedTabId)
+          ? Array.from(_selectedTabIds)
+          : [_draggedTabId];
+        vscode.postMessage({ type: 'moveToGroup', tabIds, groupId });
+        _selectedTabIds.clear();
+      } else if (_draggedGroupId && _draggedGroupId !== groupId) {
+        vscode.postMessage({
+          type: 'moveGroupToGroup',
+          sourceGroupId: _draggedGroupId,
+          targetGroupId: groupId,
+        });
+      }
     });
   });
 }
@@ -1425,13 +1761,48 @@ function _attachDragAndDrop(): void {
 // =====================
 
 function attachListeners(): void {
+  // Tab click — with multi-select support (Ctrl/Cmd+click)
   document.querySelectorAll('.tab').forEach((el) => {
     el.addEventListener('click', (e) => {
       const target = e.currentTarget as HTMLElement;
       const tabId = target.dataset.tabId;
-      if (tabId) {
-        vscode.postMessage({ type: 'tabClicked', tabId });
+      if (!tabId) {
+        return;
       }
+
+      if (e.ctrlKey || e.metaKey) {
+        // Multi-select toggle
+        e.preventDefault();
+        e.stopPropagation();
+        if (_selectedTabIds.has(tabId)) {
+          _selectedTabIds.delete(tabId);
+        } else {
+          _selectedTabIds.add(tabId);
+        }
+        render();
+        return;
+      }
+
+      // Normal click — clear selection and activate tab
+      _selectedTabIds.clear();
+      vscode.postMessage({ type: 'tabClicked', tabId });
+    });
+  });
+
+  // Tab select checkbox/area
+  document.querySelectorAll('.tab__select').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const tabId = (el as HTMLElement).dataset.selectId;
+      if (!tabId) {
+        return;
+      }
+      if (_selectedTabIds.has(tabId)) {
+        _selectedTabIds.delete(tabId);
+      } else {
+        _selectedTabIds.add(tabId);
+      }
+      render();
     });
   });
 
@@ -1613,6 +1984,51 @@ function attachListeners(): void {
       }
     });
   });
+
+  // --- Tab Group event listeners ---
+
+  // Group collapse toggle
+  document.querySelectorAll('.tab-group__chevron').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const groupId = (el as HTMLElement).dataset.toggleGroup;
+      if (groupId) {
+        vscode.postMessage({ type: 'toggleGroupCollapse', groupId });
+      }
+    });
+  });
+
+  // Group rename (double-click on name)
+  document.querySelectorAll('.tab-group__rename').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const groupId = (el as HTMLElement).dataset.renameGroup;
+      if (groupId) {
+        _showRenameGroupDialog(groupId);
+      }
+    });
+  });
+
+  // Group delete
+  document.querySelectorAll('.tab-group__delete').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const groupId = (el as HTMLElement).dataset.deleteGroup;
+      if (groupId) {
+        vscode.postMessage({ type: 'deleteGroup', groupId });
+      }
+    });
+  });
+
+  // Create group button
+  const createGroupBtn = document.getElementById('create-group-btn');
+  if (createGroupBtn) {
+    createGroupBtn.addEventListener('click', () => {
+      if (_selectedTabIds.size > 0) {
+        _showCreateGroupDialog();
+      }
+    });
+  }
 }
 
 // =====================
@@ -1879,6 +2295,194 @@ function _showSaveInvestigationAsDialog(): void {
       close();
     }
   });
+}
+
+// =====================
+// Create Group Dialog
+// =====================
+
+function _showCreateGroupDialog(): void {
+  const existing = document.getElementById('create-group-dialog-overlay');
+  if (existing) {
+    existing.remove();
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'create-group-dialog-overlay';
+  overlay.className = 'enhance-dialog-overlay';
+
+  overlay.innerHTML = `<div class="enhance-dialog">
+    <div class="enhance-dialog__header">
+      <span class="enhance-dialog__title">\uD83D\uDCC1 Create Group</span>
+      <button class="enhance-dialog__close" id="create-group-dialog-close">\u00D7</button>
+    </div>
+    <div class="enhance-dialog__body">
+      <label class="enhance-dialog__label" for="create-group-dialog-input">
+        Group ${_selectedTabIds.size} selected tab${_selectedTabIds.size > 1 ? 's' : ''}:
+      </label>
+      <input
+        class="enhance-dialog__input"
+        id="create-group-dialog-input"
+        type="text"
+        placeholder="e.g., Auth Flow, Error Handling"
+      />
+    </div>
+    <div class="enhance-dialog__footer">
+      <button class="enhance-dialog__cancel" id="create-group-dialog-cancel">Cancel</button>
+      <button class="enhance-dialog__submit" id="create-group-dialog-submit">Create</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+
+  const input = document.getElementById('create-group-dialog-input') as HTMLInputElement;
+  const submitBtn = document.getElementById('create-group-dialog-submit') as HTMLButtonElement;
+  const cancelBtn = document.getElementById('create-group-dialog-cancel') as HTMLButtonElement;
+  const closeBtn = document.getElementById('create-group-dialog-close') as HTMLButtonElement;
+
+  setTimeout(() => input.focus(), 50);
+
+  const close = (): void => {
+    overlay.remove();
+  };
+
+  const submit = (): void => {
+    const name = input.value.trim();
+    if (!name) {
+      input.classList.add('enhance-dialog__input--error');
+      input.focus();
+      return;
+    }
+    const tabIds = Array.from(_selectedTabIds);
+    log(`create group: "${name}" with ${tabIds.length} tabs`);
+    vscode.postMessage({ type: 'createGroup', name, tabIds });
+    _selectedTabIds.clear();
+    close();
+  };
+
+  submitBtn.addEventListener('click', submit);
+  cancelBtn.addEventListener('click', close);
+  closeBtn.addEventListener('click', close);
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      close();
+    } else if (e.key === 'Enter') {
+      submit();
+    }
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      close();
+    }
+  });
+}
+
+// =====================
+// Rename Group Dialog
+// =====================
+
+function _showRenameGroupDialog(groupId: string): void {
+  // Find the group name from _tabGroups
+  const currentName = _findGroupName(groupId, _tabGroups) || '';
+
+  const existing = document.getElementById('rename-group-dialog-overlay');
+  if (existing) {
+    existing.remove();
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'rename-group-dialog-overlay';
+  overlay.className = 'enhance-dialog-overlay';
+
+  overlay.innerHTML = `<div class="enhance-dialog">
+    <div class="enhance-dialog__header">
+      <span class="enhance-dialog__title">Rename Group</span>
+      <button class="enhance-dialog__close" id="rename-group-dialog-close">\u00D7</button>
+    </div>
+    <div class="enhance-dialog__body">
+      <label class="enhance-dialog__label" for="rename-group-dialog-input">
+        New name:
+      </label>
+      <input
+        class="enhance-dialog__input"
+        id="rename-group-dialog-input"
+        type="text"
+        value="${escAttr(currentName)}"
+      />
+    </div>
+    <div class="enhance-dialog__footer">
+      <button class="enhance-dialog__cancel" id="rename-group-dialog-cancel">Cancel</button>
+      <button class="enhance-dialog__submit" id="rename-group-dialog-submit">Rename</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+
+  const input = document.getElementById('rename-group-dialog-input') as HTMLInputElement;
+  const submitBtn = document.getElementById('rename-group-dialog-submit') as HTMLButtonElement;
+  const cancelBtn = document.getElementById('rename-group-dialog-cancel') as HTMLButtonElement;
+  const closeBtn = document.getElementById('rename-group-dialog-close') as HTMLButtonElement;
+
+  setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 50);
+
+  const close = (): void => {
+    overlay.remove();
+  };
+
+  const submit = (): void => {
+    const name = input.value.trim();
+    if (!name) {
+      input.classList.add('enhance-dialog__input--error');
+      input.focus();
+      return;
+    }
+    log(`rename group: ${groupId} → "${name}"`);
+    vscode.postMessage({ type: 'renameGroup', groupId, name });
+    close();
+  };
+
+  submitBtn.addEventListener('click', submit);
+  cancelBtn.addEventListener('click', close);
+  closeBtn.addEventListener('click', close);
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      close();
+    } else if (e.key === 'Enter') {
+      submit();
+    }
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      close();
+    }
+  });
+}
+
+/**
+ * Find a group name by ID (recursive).
+ */
+function _findGroupName(groupId: string, groups: TabGroup[]): string | null {
+  for (const g of groups) {
+    if (g.id === groupId) {
+      return g.name;
+    }
+    for (const child of g.children) {
+      if (child.type === 'group') {
+        const found = _findGroupName(groupId, [child.group]);
+        if (found) {
+          return found;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 // =====================

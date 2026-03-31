@@ -636,6 +636,8 @@ export interface PinnedInvestigation {
   }[];
   /** ISO 8601 timestamp of when this investigation was pinned */
   pinnedAt: string;
+  /** Tab group tree structure saved with this investigation */
+  tabGroups?: TabGroup[];
 }
 
 /**
@@ -702,6 +704,33 @@ export interface ExplorerState {
 }
 
 // =====================
+// Tab Groups (Tree-wise grouping)
+// =====================
+
+/**
+ * A node in the tab group tree. Can be either a tab reference or a named group
+ * containing other nodes (tabs or nested groups).
+ */
+export type TabTreeNode =
+  | { type: 'tab'; tabId: string }
+  | { type: 'group'; group: TabGroup };
+
+/**
+ * A named group of tabs that can be nested.
+ * Groups form a tree structure for organizing symbol explorations.
+ */
+export interface TabGroup {
+  /** Unique group identifier */
+  id: string;
+  /** User-given name for this group */
+  name: string;
+  /** Child nodes — tabs or nested groups, in display order */
+  children: TabTreeNode[];
+  /** Whether the group is collapsed in the UI */
+  collapsed: boolean;
+}
+
+// =====================
 // LLM Types
 // =====================
 
@@ -741,6 +770,8 @@ export type ExtensionToWebviewMessage =
       activeTabId: string | null;
       /** Navigation history for breadcrumb trail display */
       navigationHistory?: NavigationHistoryState;
+      /** Tree-wise tab grouping structure (tabs not in any group are ungrouped) */
+      tabGroups?: TabGroup[];
     }
   | {
       type: 'showDependencyGraph';
@@ -773,7 +804,14 @@ export type WebviewToExtensionMessage =
   | { type: 'updateNotes'; tabId: string; notes: string }
   | { type: 'saveInvestigation' }
   | { type: 'saveInvestigationAs'; name: string }
-  | { type: 'renameInvestigation'; name: string };
+  | { type: 'renameInvestigation'; name: string }
+  | { type: 'createGroup'; name: string; tabIds: string[] }
+  | { type: 'renameGroup'; groupId: string; name: string }
+  | { type: 'deleteGroup'; groupId: string }
+  | { type: 'toggleGroupCollapse'; groupId: string }
+  | { type: 'moveToGroup'; tabIds: string[]; groupId: string | null; insertIndex?: number }
+  | { type: 'moveGroupToGroup'; sourceGroupId: string; targetGroupId: string | null; insertIndex?: number }
+  | { type: 'ungroupTabs'; tabIds: string[] };
 
 // =====================
 // Queued Analysis

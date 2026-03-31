@@ -21,3 +21,12 @@ Treat the codebase as a graph / tree of symbols. There should be placeholder fil
 Allow saving investigations, easily view multiple investigations, load, edit investigations (simply a chain of symbols explored). Within an investigation, allow dragging to change order, removing symbol, adding notes.
 --
 Let cli be used by copilot. Have method "getContextForSymbol" which will get the symbol analysis as well as details of methods around it
+
+Support tree-wise grouping of vertical tabs. Allow user to select multiple tabs and group them into a named group. Groups can be nested into another groups. This config is saved as investigation which can be restored. Allow dragging dropping tabs into and out of the groups.
+
+--
+-------------
+-- 
+Auto group
+- If a tab symbol is called of another symbol tab, auto add that tab as a child. Basically the tabs should mirror the symbol hierarchy.
+--

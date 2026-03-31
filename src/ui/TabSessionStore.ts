@@ -10,7 +10,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import type { SymbolInfo, NavigationEntry, PinnedInvestigation } from '../models/types';
+import type { SymbolInfo, NavigationEntry, PinnedInvestigation, TabGroup } from '../models/types';
 import { logger } from '../utils/logger';
 
 /** Minimal per-tab data needed to reconstruct tabs on restore. */
@@ -37,6 +37,8 @@ export interface TabSession {
   navigationIndex?: number;
   /** Pinned investigations (optional for backward compatibility) */
   pinnedInvestigations?: PinnedInvestigation[];
+  /** Tab group tree structure (optional for backward compatibility) */
+  tabGroups?: TabGroup[];
 }
 
 const SESSION_FILE_NAME = 'tab-session.json';
@@ -65,7 +67,8 @@ export class TabSessionStore {
     activeTabId: string | null,
     navigationHistory?: NavigationEntry[],
     navigationIndex?: number,
-    pinnedInvestigations?: PinnedInvestigation[]
+    pinnedInvestigations?: PinnedInvestigation[],
+    tabGroups?: TabGroup[]
   ): void {
     const session: TabSession = {
       version: 1,
@@ -75,6 +78,7 @@ export class TabSessionStore {
       navigationHistory,
       navigationIndex,
       pinnedInvestigations,
+      tabGroups,
     };
 
     try {

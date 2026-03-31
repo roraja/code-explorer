@@ -17,6 +17,8 @@ import type {
   NavigationTrigger,
   PinnedInvestigation,
   NavigationHistoryState,
+  TabGroup,
+  TabTreeNode,
 } from '../models/types';
 import type { AnalysisOrchestrator } from '../analysis/AnalysisOrchestrator';
 import type { CacheStore } from '../cache/CacheStore';
@@ -55,6 +57,10 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
   private _currentInvestigationId: string | null = null;
   /** Whether the current investigation has been modified since last save */
   private _currentInvestigationDirty = false;
+  /** Tab groups for tree-wise grouping */
+  private _tabGroups: TabGroup[] = [];
+  /** Counter for generating unique group IDs */
+  private _groupCounter = 0;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -338,6 +344,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       tabs: this._tabs,
       activeTabId: this._activeTabId,
       navigationHistory: this._getNavigationHistoryState(),
+      tabGroups: this._tabGroups,
     };
 
     // Persist tab session on every state change
@@ -390,7 +397,8 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       activeId,
       this._navigationHistory,
       this._navigationIndex,
-      this._pinnedInvestigations
+      this._pinnedInvestigations,
+      this._tabGroups
     );
   }
 
@@ -498,11 +506,19 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         this._investigationCounter = this._pinnedInvestigations.length;
       }
 
+      // Restore tab groups with mapped tab IDs
+      if (session.tabGroups && session.tabGroups.length > 0) {
+        this._tabGroups = this._remapGroupTabIds(session.tabGroups, idMap);
+        // Update group counter to avoid ID conflicts
+        this._groupCounter = this._countGroups(this._tabGroups);
+      }
+
       logger.info(
         `ViewProvider._restoreTabsAsync: restored ${restoredCount} tabs, ` +
           `active=${this._activeTabId}, ` +
           `history=${this._navigationHistory.length} entries, ` +
-          `investigations=${this._pinnedInvestigations.length}`
+          `investigations=${this._pinnedInvestigations.length}, ` +
+          `groups=${this._tabGroups.length}`
       );
       this._pushState();
     } else {
@@ -548,6 +564,8 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         }
         // Clean up navigation history references to the closed tab
         this._cleanupNavigationHistory(message.tabId);
+        // Remove from any tab group
+        this._removeTabFromGroups(message.tabId);
         this._pushState();
         break;
       }
@@ -685,6 +703,52 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       case 'renameInvestigation': {
         logger.info(`ViewProvider: renameInvestigation "${message.name}"`);
         this._renameCurrentInvestigation(message.name);
+        break;
+      }
+
+      case 'createGroup': {
+        logger.info(`ViewProvider: createGroup "${message.name}" with ${message.tabIds.length} tabs`);
+        this._createGroup(message.name, message.tabIds);
+        break;
+      }
+
+      case 'renameGroup': {
+        logger.info(`ViewProvider: renameGroup ${message.groupId} → "${message.name}"`);
+        this._renameGroup(message.groupId, message.name);
+        break;
+      }
+
+      case 'deleteGroup': {
+        logger.info(`ViewProvider: deleteGroup ${message.groupId}`);
+        this._deleteGroup(message.groupId);
+        break;
+      }
+
+      case 'toggleGroupCollapse': {
+        logger.debug(`ViewProvider: toggleGroupCollapse ${message.groupId}`);
+        this._toggleGroupCollapse(message.groupId);
+        break;
+      }
+
+      case 'moveToGroup': {
+        logger.info(
+          `ViewProvider: moveToGroup ${message.tabIds.join(',')} → ${message.groupId ?? 'ungrouped'}`
+        );
+        this._moveTabsToGroup(message.tabIds, message.groupId, message.insertIndex);
+        break;
+      }
+
+      case 'moveGroupToGroup': {
+        logger.info(
+          `ViewProvider: moveGroupToGroup ${message.sourceGroupId} → ${message.targetGroupId ?? 'root'}`
+        );
+        this._moveGroupToGroup(message.sourceGroupId, message.targetGroupId, message.insertIndex);
+        break;
+      }
+
+      case 'ungroupTabs': {
+        logger.info(`ViewProvider: ungroupTabs ${message.tabIds.join(',')}`);
+        this._ungroupTabs(message.tabIds);
         break;
       }
     }
@@ -1218,6 +1282,14 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
         }));
       }
 
+      // Restore tab groups from the investigation (with remapped IDs)
+      if (investigation.tabGroups && investigation.tabGroups.length > 0) {
+        this._tabGroups = this._remapGroupTabIds(investigation.tabGroups, idMap);
+        this._groupCounter = this._countGroups(this._tabGroups);
+      } else {
+        this._tabGroups = [];
+      }
+
       logger.info(
         `ViewProvider._restoreInvestigation: restored ${newTabs.length} tabs ` +
           `from investigation "${investigation.name}" ` +
@@ -1311,6 +1383,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       symbol: t.symbol,
     }));
     existing.pinnedAt = new Date().toISOString();
+    existing.tabGroups = JSON.parse(JSON.stringify(this._tabGroups));
 
     this._currentInvestigationDirty = false;
     logger.info(
@@ -1343,6 +1416,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       trail,
       trailSymbols,
       pinnedAt: new Date().toISOString(),
+      tabGroups: JSON.parse(JSON.stringify(this._tabGroups)),
     };
 
     this._pinnedInvestigations.push(investigation);
@@ -1364,6 +1438,371 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
     this._currentInvestigationName = name;
     this._markInvestigationDirty();
     this._pushState();
+  }
+
+  // =====================
+  // Tab Group Management
+  // =====================
+
+  /**
+   * Create a new named group from selected tab IDs.
+   * Removes those tabs from any existing groups they belong to,
+   * then creates a new top-level group containing them.
+   */
+  private _createGroup(name: string, tabIds: string[]): void {
+    if (tabIds.length === 0) {
+      logger.warn('ViewProvider._createGroup: no tab IDs provided');
+      return;
+    }
+
+    // Remove these tabs from any existing groups
+    for (const tabId of tabIds) {
+      this._removeTabFromAllGroups(tabId);
+    }
+
+    const group: TabGroup = {
+      id: `group-${++this._groupCounter}`,
+      name,
+      children: tabIds.map((tabId) => ({ type: 'tab' as const, tabId })),
+      collapsed: false,
+    };
+
+    this._tabGroups.push(group);
+    this._markInvestigationDirty();
+    logger.info(
+      `ViewProvider._createGroup: created "${name}" (${group.id}) with ${tabIds.length} tabs`
+    );
+    this._pushState();
+  }
+
+  /**
+   * Rename an existing group.
+   */
+  private _renameGroup(groupId: string, name: string): void {
+    const group = this._findGroupById(groupId);
+    if (group) {
+      group.name = name;
+      this._markInvestigationDirty();
+      this._pushState();
+    }
+  }
+
+  /**
+   * Delete a group. Its children (tabs and nested groups) are promoted
+   * to the parent level (or to ungrouped if at root).
+   */
+  private _deleteGroup(groupId: string): void {
+    const removed = this._removeGroupFromTree(groupId, this._tabGroups);
+    if (removed) {
+      this._markInvestigationDirty();
+      this._pushState();
+    }
+  }
+
+  /**
+   * Toggle collapsed state of a group.
+   */
+  private _toggleGroupCollapse(groupId: string): void {
+    const group = this._findGroupById(groupId);
+    if (group) {
+      group.collapsed = !group.collapsed;
+      this._pushState();
+    }
+  }
+
+  /**
+   * Move tabs into a group (or to ungrouped if groupId is null).
+   * Removes tabs from any existing group first.
+   */
+  private _moveTabsToGroup(
+    tabIds: string[],
+    groupId: string | null,
+    insertIndex?: number
+  ): void {
+    // Remove tabs from their current groups
+    for (const tabId of tabIds) {
+      this._removeTabFromAllGroups(tabId);
+    }
+
+    if (groupId === null) {
+      // Moving to ungrouped — tabs are already removed from groups, done
+      this._markInvestigationDirty();
+      this._pushState();
+      return;
+    }
+
+    // Find the target group and insert tabs
+    const targetGroup = this._findGroupById(groupId);
+    if (!targetGroup) {
+      logger.warn(`ViewProvider._moveTabsToGroup: group ${groupId} not found`);
+      return;
+    }
+
+    const newNodes: TabTreeNode[] = tabIds.map((tabId) => ({ type: 'tab' as const, tabId }));
+    const idx = insertIndex !== undefined ? insertIndex : targetGroup.children.length;
+    targetGroup.children.splice(idx, 0, ...newNodes);
+
+    this._markInvestigationDirty();
+    this._pushState();
+  }
+
+  /**
+   * Move a group into another group (nesting), or to the root level.
+   */
+  private _moveGroupToGroup(
+    sourceGroupId: string,
+    targetGroupId: string | null,
+    insertIndex?: number
+  ): void {
+    // Prevent moving a group into itself or its descendants
+    if (targetGroupId && this._isDescendantGroup(sourceGroupId, targetGroupId)) {
+      logger.warn('ViewProvider._moveGroupToGroup: cannot move group into its own descendant');
+      return;
+    }
+
+    // Extract the source group from wherever it is
+    const sourceGroup = this._extractGroupFromTree(sourceGroupId);
+    if (!sourceGroup) {
+      logger.warn(`ViewProvider._moveGroupToGroup: source group ${sourceGroupId} not found`);
+      return;
+    }
+
+    if (targetGroupId === null) {
+      // Move to root level
+      const idx = insertIndex !== undefined ? insertIndex : this._tabGroups.length;
+      this._tabGroups.splice(idx, 0, sourceGroup);
+    } else {
+      const target = this._findGroupById(targetGroupId);
+      if (!target) {
+        // If target not found, put back at root
+        this._tabGroups.push(sourceGroup);
+        logger.warn(`ViewProvider._moveGroupToGroup: target group ${targetGroupId} not found`);
+        return;
+      }
+      const idx = insertIndex !== undefined ? insertIndex : target.children.length;
+      target.children.splice(idx, 0, { type: 'group', group: sourceGroup });
+    }
+
+    this._markInvestigationDirty();
+    this._pushState();
+  }
+
+  /**
+   * Remove tabs from their groups (move to ungrouped).
+   */
+  private _ungroupTabs(tabIds: string[]): void {
+    for (const tabId of tabIds) {
+      this._removeTabFromAllGroups(tabId);
+    }
+    this._markInvestigationDirty();
+    this._pushState();
+  }
+
+  // --- Group tree helpers ---
+
+  /**
+   * Find a group by ID anywhere in the tree (recursive).
+   */
+  private _findGroupById(groupId: string, groups?: TabGroup[]): TabGroup | null {
+    for (const g of groups ?? this._tabGroups) {
+      if (g.id === groupId) {
+        return g;
+      }
+      for (const child of g.children) {
+        if (child.type === 'group') {
+          const found = this._findGroupById(groupId, [child.group]);
+          if (found) {
+            return found;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Remove a tab reference from all groups in the tree.
+   */
+  private _removeTabFromAllGroups(tabId: string, groups?: TabGroup[]): void {
+    for (const g of groups ?? this._tabGroups) {
+      g.children = g.children.filter(
+        (child) => !(child.type === 'tab' && child.tabId === tabId)
+      );
+      for (const child of g.children) {
+        if (child.type === 'group') {
+          this._removeTabFromAllGroups(tabId, [child.group]);
+        }
+      }
+    }
+    // Clean up empty groups
+    this._cleanupEmptyGroups();
+  }
+
+  /**
+   * Remove a group from the tree and promote its children to the parent level.
+   * Returns true if the group was found and removed.
+   */
+  private _removeGroupFromTree(groupId: string, groups: TabGroup[]): boolean {
+    for (let i = 0; i < groups.length; i++) {
+      if (groups[i].id === groupId) {
+        // Promote children: for each child group, insert at this level;
+        // tab children become ungrouped (just removed from group)
+        const removedGroup = groups[i];
+        const promotedGroups: TabGroup[] = [];
+        for (const child of removedGroup.children) {
+          if (child.type === 'group') {
+            promotedGroups.push(child.group);
+          }
+          // Tab children: no action needed — they become ungrouped automatically
+        }
+        groups.splice(i, 1, ...promotedGroups);
+        return true;
+      }
+      // Search nested
+      for (const child of groups[i].children) {
+        if (child.type === 'group') {
+          if (this._removeGroupFromTreeInChildren(groupId, groups[i])) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Remove a group from within a parent group's children.
+   */
+  private _removeGroupFromTreeInChildren(groupId: string, parent: TabGroup): boolean {
+    for (let i = 0; i < parent.children.length; i++) {
+      const child = parent.children[i];
+      if (child.type === 'group' && child.group.id === groupId) {
+        // Promote the group's children to this level
+        const removedGroup = child.group;
+        const promoted: TabTreeNode[] = [];
+        for (const grandchild of removedGroup.children) {
+          promoted.push(grandchild);
+        }
+        parent.children.splice(i, 1, ...promoted);
+        return true;
+      }
+      if (child.type === 'group') {
+        if (this._removeGroupFromTreeInChildren(groupId, child.group)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Extract (remove and return) a group from the tree without promoting children.
+   */
+  private _extractGroupFromTree(groupId: string, groups?: TabGroup[]): TabGroup | null {
+    const targetGroups = groups ?? this._tabGroups;
+    for (let i = 0; i < targetGroups.length; i++) {
+      if (targetGroups[i].id === groupId) {
+        return targetGroups.splice(i, 1)[0];
+      }
+      for (let j = 0; j < targetGroups[i].children.length; j++) {
+        const child = targetGroups[i].children[j];
+        if (child.type === 'group') {
+          if (child.group.id === groupId) {
+            targetGroups[i].children.splice(j, 1);
+            return child.group;
+          }
+          const found = this._extractGroupFromTree(groupId, [child.group]);
+          if (found) {
+            // Was found and extracted from a nested child's children array
+            // But we passed [child.group] as a temporary array, so the extraction
+            // happened in-place within child.group's children. Verify:
+            return found;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Check whether `candidateId` is the same as or a descendant of `ancestorId`.
+   */
+  private _isDescendantGroup(ancestorId: string, candidateId: string): boolean {
+    if (ancestorId === candidateId) {
+      return true;
+    }
+    const ancestor = this._findGroupById(ancestorId);
+    if (!ancestor) {
+      return false;
+    }
+    for (const child of ancestor.children) {
+      if (child.type === 'group') {
+        if (this._isDescendantGroup(child.group.id, candidateId)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Remove groups that have no children (after tab removal).
+   * Does not auto-remove empty groups; user must delete manually.
+   * Kept as no-op placeholder for now.
+   */
+  private _cleanupEmptyGroups(): void {
+    // Intentionally not auto-removing empty groups — users may want to keep
+    // empty groups as placeholders. They can delete manually.
+  }
+
+  /**
+   * When a tab is closed, also remove it from any group it belongs to.
+   */
+  private _removeTabFromGroups(tabId: string): void {
+    this._removeTabFromAllGroups(tabId);
+  }
+
+  /**
+   * Remap tab IDs in a group tree using a mapping (for session restore).
+   * Only keeps tab references that exist in the id map (restored tabs).
+   */
+  private _remapGroupTabIds(groups: TabGroup[], idMap: Map<string, string>): TabGroup[] {
+    return groups.map((g) => ({
+      ...g,
+      children: g.children
+        .map((child): TabTreeNode | null => {
+          if (child.type === 'tab') {
+            const newId = idMap.get(child.tabId);
+            if (!newId) {
+              return null; // Tab was not restored (cache miss)
+            }
+            return { type: 'tab', tabId: newId };
+          }
+          // Nested group — recurse
+          const remapped = this._remapGroupTabIds([child.group], idMap);
+          if (remapped.length === 0) {
+            return null;
+          }
+          return { type: 'group', group: remapped[0] };
+        })
+        .filter((child): child is TabTreeNode => child !== null),
+    }));
+  }
+
+  /**
+   * Count total groups (including nested) for counter initialization.
+   */
+  private _countGroups(groups: TabGroup[]): number {
+    let count = 0;
+    for (const g of groups) {
+      count++;
+      for (const child of g.children) {
+        if (child.type === 'group') {
+          count += this._countGroups([child.group]);
+        }
+      }
+    }
+    return count;
   }
 
   /**

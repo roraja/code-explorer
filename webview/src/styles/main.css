@@ -282,6 +282,180 @@ body {
   border-bottom: 2px solid var(--vscode-focusBorder, #007acc) !important;
 }
 
+/* Multi-select highlight */
+.tab--selected {
+  background: var(--vscode-list-activeSelectionBackground, rgba(4, 57, 94, 0.5)) !important;
+  outline: 1px solid var(--vscode-focusBorder, #007acc);
+  outline-offset: -1px;
+}
+
+/* Tab select checkbox area */
+.tab__select {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--vscode-checkbox-border, rgba(255, 255, 255, 0.3));
+  border-radius: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.tab:hover .tab__select,
+.tab--selected .tab__select {
+  opacity: 1;
+}
+
+.tab--selected .tab__select {
+  background: var(--vscode-focusBorder, #007acc);
+  border-color: var(--vscode-focusBorder, #007acc);
+}
+
+.tab--selected .tab__select::after {
+  content: '\2713';
+  font-size: 9px;
+  color: white;
+  line-height: 1;
+}
+
+/* =====================
+   Tab Groups
+   ===================== */
+
+.tab-group {
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+}
+
+.tab-group__header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground));
+  background: var(--vscode-sideBarSectionHeader-background, rgba(255, 255, 255, 0.04));
+  user-select: none;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+}
+
+.tab-group__header:hover {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
+}
+
+.tab-group__header--dragging {
+  opacity: 0.4;
+}
+
+.tab-group__chevron {
+  font-size: 9px;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.tab-group__chevron:hover {
+  opacity: 1;
+}
+
+.tab-group__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-group__count {
+  font-size: 10px;
+  font-weight: normal;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.6;
+  flex-shrink: 0;
+  min-width: 14px;
+  text-align: center;
+}
+
+.tab-group__rename,
+.tab-group__delete {
+  opacity: 0;
+  font-size: 12px;
+  flex-shrink: 0;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.tab-group__header:hover .tab-group__rename,
+.tab-group__header:hover .tab-group__delete {
+  opacity: 0.6;
+}
+
+.tab-group__rename:hover,
+.tab-group__delete:hover {
+  opacity: 1 !important;
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+}
+
+.tab-group__children {
+  /* Nested tabs are indented via inline padding-left */
+}
+
+/* Group drop indicators */
+.tab-group--drop-into {
+  outline: 2px solid var(--vscode-focusBorder, #007acc);
+  outline-offset: -2px;
+  background: var(--vscode-list-dropBackground, rgba(4, 57, 94, 0.3)) !important;
+}
+
+.tab-group--drop-above {
+  border-top: 2px solid var(--vscode-focusBorder, #007acc) !important;
+}
+
+.tab-group--drop-below {
+  border-bottom: 2px solid var(--vscode-focusBorder, #007acc) !important;
+}
+
+/* =====================
+   Tab Group Actions Bar
+   ===================== */
+
+.tab-group-actions {
+  display: flex;
+  padding: 3px 6px;
+  flex-shrink: 0;
+}
+
+.tab-group-actions__btn {
+  flex: 1;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: var(--vscode-font-family);
+  border: 1px solid var(--vscode-button-secondaryBackground, rgba(255, 255, 255, 0.1));
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  text-align: center;
+}
+
+.tab-group-actions__btn:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
+  color: var(--vscode-foreground);
+}
+
+.tab-group-actions__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* =====================
    Investigation Header (top of sidebar)
    ===================== */

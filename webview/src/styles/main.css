@@ -347,6 +347,32 @@ body {
 }
 
 /* Tab bar internal structure */
+.tab-search {
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+
+.tab-search__input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--vscode-input-background, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--vscode-input-border, rgba(255, 255, 255, 0.1));
+  border-radius: 3px;
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font-size: 11px;
+  font-family: var(--vscode-font-family);
+  padding: 3px 6px;
+  outline: none;
+}
+
+.tab-search__input::placeholder {
+  color: var(--vscode-input-placeholderForeground, rgba(255, 255, 255, 0.4));
+}
+
+.tab-search__input:focus {
+  border-color: var(--vscode-focusBorder, #007acc);
+}
+
 .tab-bar__divider {
   height: 1px;
   background: var(--vscode-sideBarSectionHeader-border, rgba(255, 255, 255, 0.08));

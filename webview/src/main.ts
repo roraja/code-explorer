@@ -81,6 +81,8 @@ let _graphMermaidSource = '';
 /** Graph metadata for the header */
 let _graphNodeCount = 0;
 let _graphEdgeCount = 0;
+/** Current tab search filter text (case-insensitive) */
+let _tabSearchFilter = '';
 
 function log(msg: string): void {
   console.log(`[CE] ${msg}`);
@@ -265,8 +267,30 @@ function renderTabBar(): string {
     </div>
   </div>`;
 
+  // Search box for filtering tabs
+  const searchBox = `<div class="tab-search">
+    <input class="tab-search__input" id="tab-search-input" type="text" placeholder="Filter tabs\u2026" value="${escAttr(_tabSearchFilter)}" />
+  </div>`;
+
   // Tab list (draggable, in display order — newest first)
-  const tabs = currentTabs
+  // Apply search filter (case-insensitive match on symbol name, kind, file path, scope chain)
+  const filterText = _tabSearchFilter.toLowerCase();
+  const filteredTabs = filterText
+    ? currentTabs.filter((tab) => {
+        const name = tab.symbol.name.toLowerCase();
+        const kind = tab.symbol.kind.toLowerCase();
+        const file = tab.symbol.filePath.toLowerCase();
+        const scope = (tab.symbol.scopeChain || []).join('.').toLowerCase();
+        return (
+          name.includes(filterText) ||
+          kind.includes(filterText) ||
+          file.includes(filterText) ||
+          scope.includes(filterText)
+        );
+      })
+    : currentTabs;
+
+  const tabs = filteredTabs
     .map((tab) => {
       const active = tab.id === currentActiveTabId ? ' tab--active' : '';
       const icon = kindIcon(tab.symbol.kind);
@@ -314,6 +338,7 @@ function renderTabBar(): string {
 
   return `<div class="tab-bar">
     ${invHeader}
+    ${searchBox}
     <div class="tab-bar__divider"></div>
     <div class="tab-bar__tabs" id="tab-list">${tabs}</div>
     <div class="tab-bar__divider"></div>
@@ -1528,6 +1553,21 @@ function attachListeners(): void {
       const name = invNameInput.value.trim();
       if (name) {
         vscode.postMessage({ type: 'renameInvestigation', name });
+      }
+    });
+  }
+
+  // Tab search filter input
+  const tabSearchInput = document.getElementById('tab-search-input') as HTMLInputElement | null;
+  if (tabSearchInput) {
+    tabSearchInput.addEventListener('input', () => {
+      _tabSearchFilter = tabSearchInput.value;
+      render();
+      // Re-focus the search input and restore cursor position after re-render
+      const newInput = document.getElementById('tab-search-input') as HTMLInputElement | null;
+      if (newInput) {
+        newInput.focus();
+        newInput.selectionStart = newInput.selectionEnd = newInput.value.length;
       }
     });
   }

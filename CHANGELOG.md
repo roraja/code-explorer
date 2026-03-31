@@ -4,6 +4,12 @@ All notable changes to the "Code Explorer" extension will be documented in this 
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-03-31
+
+### Added
+- **Tab search filter**: Search box in the left sidebar below the investigation name that filters tabs in real-time (case-insensitive) by symbol name, kind, file path, or scope chain
+- **Updated context documentation**: All CONTEXT.md files and FLOORPLAN.md updated to reflect current codebase state, including new CONTEXT.md files for `src/graph/` and `src/cli/`
+
 ## [0.3.3] - 2026-03-30
 
 ### Changed

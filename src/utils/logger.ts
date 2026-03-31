@@ -67,7 +67,7 @@ function getChannel(): OutputChannelLike {
   if (!_channel) {
     if (isVscodeAvailable()) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
         const vscode = require('vscode');
         _channel = vscode.window.createOutputChannel(EXTENSION_DISPLAY_NAME);
       } catch {

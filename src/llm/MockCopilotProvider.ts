@@ -80,13 +80,7 @@ export class MockCopilotProvider implements LLMProvider {
   async analyze(request: LLMAnalysisRequest): Promise<string> {
     const scriptPath = this._getScriptPath();
 
-    const args = [
-      scriptPath,
-      '--delay',
-      String(this._delayMs),
-      '--output-format',
-      'text',
-    ];
+    const args = [scriptPath, '--delay', String(this._delayMs), '--output-format', 'text'];
 
     // Prepend system instructions into the prompt text (same as copilot-cli).
     let fullPrompt = request.prompt;

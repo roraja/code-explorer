@@ -13,11 +13,7 @@ import * as os from 'os';
 import { CodeExplorerAPI } from '../../../src/api/CodeExplorerAPI';
 import { FileSystemSourceReader } from '../../../src/api/FileSystemSourceReader';
 import { MockLLMProvider } from './helpers/MockLLMProvider';
-import {
-  SAMPLE_SOURCE,
-  EXPLORE_SYMBOL_RESPONSE,
-  ENHANCE_RESPONSE,
-} from './helpers/fixtures';
+import { SAMPLE_SOURCE, EXPLORE_SYMBOL_RESPONSE, ENHANCE_RESPONSE } from './helpers/fixtures';
 import type { CursorContext } from '../../../src/models/types';
 
 suite('CodeExplorerAPI.enhance', () => {

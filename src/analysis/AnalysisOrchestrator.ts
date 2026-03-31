@@ -372,117 +372,42 @@ export class AnalysisOrchestrator {
 
     // 1–3. Cache tiers — skip entirely when force=true (re-analyze)
     if (!force) {
-
-    // 1. TIER 1: Try VS Code static analysis to resolve symbol (fast, deterministic, no LLM)
-    //    Uses definition provider + document symbol provider to get name, kind, scope chain.
-    onProgress?.('cache-check');
-    logger.logLLMStep(
-      `TIER 1: VS Code static analysis — resolving symbol at ${cursor.filePath}:${cursor.position.line}:${cursor.position.character}...`
-    );
-    const staticSymbol = await withTimeout(
-      this._sourceReader.resolveSymbolAtPosition(
-        cursor.filePath,
-        cursor.position.line,
-        cursor.position.character,
-        cursor.word
-      ),
-      STATIC_ANALYSIS_TIMEOUT_MS,
-      null,
-      'resolveSymbolAtPosition'
-    );
-
-    if (staticSymbol && staticSymbol.kind !== 'unknown') {
+      // 1. TIER 1: Try VS Code static analysis to resolve symbol (fast, deterministic, no LLM)
+      //    Uses definition provider + document symbol provider to get name, kind, scope chain.
+      onProgress?.('cache-check');
       logger.logLLMStep(
-        `TIER 1 HIT: VS Code resolved ${staticSymbol.kind} "${staticSymbol.name}" ` +
-          `at ${staticSymbol.filePath}:${staticSymbol.position.line}` +
-          (staticSymbol.scopeChain?.length ? ` scope=[${staticSymbol.scopeChain.join('.')}]` : '')
+        `TIER 1: VS Code static analysis — resolving symbol at ${cursor.filePath}:${cursor.position.line}:${cursor.position.character}...`
+      );
+      const staticSymbol = await withTimeout(
+        this._sourceReader.resolveSymbolAtPosition(
+          cursor.filePath,
+          cursor.position.line,
+          cursor.position.character,
+          cursor.word
+        ),
+        STATIC_ANALYSIS_TIMEOUT_MS,
+        null,
+        'resolveSymbolAtPosition'
       );
 
-      // Build symbol address for cache lookup (no line numbers — pure AST identity)
-      const address = buildAddress(
-        staticSymbol.filePath,
-        staticSymbol.scopeChain || [],
-        staticSymbol.kind,
-        staticSymbol.name
-      );
-
-      // Try address-based cache lookup (O(1), no directory scanning)
-      logger.logLLMStep(`TIER 1 CACHE: trying address-based lookup "${address}"...`);
-      const cachedByAddress = await this._cache.readByAddress(address, staticSymbol);
-      if (
-        cachedByAddress &&
-        !cachedByAddress.metadata.stale &&
-        cachedByAddress.metadata.llmProvider
-      ) {
-        const elapsed = Date.now() - startTime;
+      if (staticSymbol && staticSymbol.kind !== 'unknown') {
         logger.logLLMStep(
-          `TIER 1 CACHE HIT — found cached analysis via address "${address}". ` +
-            `Provider: ${cachedByAddress.metadata.llmProvider}, ` +
-            `analyzed at: ${cachedByAddress.metadata.analyzedAt}. ` +
-            `Resolved in ${elapsed}ms — no LLM call needed.`
+          `TIER 1 HIT: VS Code resolved ${staticSymbol.kind} "${staticSymbol.name}" ` +
+            `at ${staticSymbol.filePath}:${staticSymbol.position.line}` +
+            (staticSymbol.scopeChain?.length ? ` scope=[${staticSymbol.scopeChain.join('.')}]` : '')
         );
-        logger.info(
-          `Orchestrator: TIER 1 HIT for "${staticSymbol.name}" — ` +
-            `static resolution + address cache (${elapsed}ms)`
+
+        // Build symbol address for cache lookup (no line numbers — pure AST identity)
+        const address = buildAddress(
+          staticSymbol.filePath,
+          staticSymbol.scopeChain || [],
+          staticSymbol.kind,
+          staticSymbol.name
         );
-        this._fireAnalysisComplete(cachedByAddress);
-        return { symbol: staticSymbol, result: cachedByAddress };
-      }
 
-      // Also try the legacy cache lookup with the resolved SymbolInfo
-      // (covers cases where cache was written by old naming convention)
-      logger.logLLMStep(`TIER 1 CACHE FALLBACK: trying legacy cache with resolved SymbolInfo...`);
-      try {
-        const cachedByKey = await this._cache.read(staticSymbol);
-        if (cachedByKey && !cachedByKey.metadata.stale && cachedByKey.metadata.llmProvider) {
-          const elapsed = Date.now() - startTime;
-          logger.logLLMStep(
-            `TIER 1 LEGACY CACHE HIT — found cached analysis via SymbolInfo key. ` +
-              `Provider: ${cachedByKey.metadata.llmProvider}, ` +
-              `Resolved in ${elapsed}ms — no LLM call needed.`
-          );
-          this._fireAnalysisComplete(cachedByKey);
-          return { symbol: staticSymbol, result: cachedByKey };
-        }
-      } catch {
-        // Legacy cache read error — continue
-      }
-
-      logger.logLLMStep(
-        `TIER 1 CACHE MISS — no cached analysis for address "${address}". Will proceed to LLM.`
-      );
-      missedAddresses.push(address);
-    } else {
-      logger.logLLMStep(
-        `TIER 1 MISS — VS Code static analysis could not resolve symbol ` +
-          `(result: ${staticSymbol ? staticSymbol.kind : 'null'}). Falling through to Tier 2.`
-      );
-    }
-
-    // 2. TIER 2: Try tree-sitter symbol index if available
-    if (this._symbolIndex) {
-      logger.logLLMStep(
-        `TIER 2: tree-sitter index — resolving cursor at ${cursor.filePath}:${cursor.position.line}...`
-      );
-      const indexEntry = this._symbolIndex.resolveAtCursor(
-        cursor.filePath,
-        cursor.position.line,
-        cursor.position.character
-      );
-      if (indexEntry) {
-        logger.logLLMStep(
-          `TIER 2 HIT: tree-sitter resolved "${indexEntry.name}" ` +
-            `(${indexEntry.kind}) at address="${indexEntry.address}"`
-        );
-        const indexSymbol: SymbolInfo = {
-          name: indexEntry.name,
-          kind: indexEntry.kind,
-          filePath: indexEntry.filePath,
-          position: { line: indexEntry.startLine, character: indexEntry.startColumn },
-          scopeChain: indexEntry.scopeChain,
-        };
-
-        const cachedByAddress = await this._cache.readByAddress(indexEntry.address, indexSymbol);
+        // Try address-based cache lookup (O(1), no directory scanning)
+        logger.logLLMStep(`TIER 1 CACHE: trying address-based lookup "${address}"...`);
+        const cachedByAddress = await this._cache.readByAddress(address, staticSymbol);
         if (
           cachedByAddress &&
           !cachedByAddress.metadata.stale &&
@@ -490,86 +415,165 @@ export class AnalysisOrchestrator {
         ) {
           const elapsed = Date.now() - startTime;
           logger.logLLMStep(
-            `TIER 2 CACHE HIT — address "${indexEntry.address}" resolved in ${elapsed}ms.`
+            `TIER 1 CACHE HIT — found cached analysis via address "${address}". ` +
+              `Provider: ${cachedByAddress.metadata.llmProvider}, ` +
+              `analyzed at: ${cachedByAddress.metadata.analyzedAt}. ` +
+              `Resolved in ${elapsed}ms — no LLM call needed.`
+          );
+          logger.info(
+            `Orchestrator: TIER 1 HIT for "${staticSymbol.name}" — ` +
+              `static resolution + address cache (${elapsed}ms)`
           );
           this._fireAnalysisComplete(cachedByAddress);
-          return { symbol: indexSymbol, result: cachedByAddress };
+          return { symbol: staticSymbol, result: cachedByAddress };
         }
-        logger.logLLMStep(`TIER 2 CACHE MISS — no cache for "${indexEntry.address}".`);
-        missedAddresses.push(indexEntry.address);
-      } else {
-        logger.logLLMStep(`TIER 2 MISS — tree-sitter index has no entry at this cursor position.`);
-      }
-    }
 
-    // 3. TIER 3: Legacy fuzzy cache scan (name + ±3 lines) — kept as fallback
-    logger.logLLMStep(
-      `TIER 3: Legacy fuzzy cache scan — symbol="${cursor.word}" ` +
-        `near line ${cursor.position.line} in ${cursor.filePath}...`
-    );
-    try {
-      let cached: { symbol: SymbolInfo; result: AnalysisResult } | null = null;
+        // Also try the legacy cache lookup with the resolved SymbolInfo
+        // (covers cases where cache was written by old naming convention)
+        logger.logLLMStep(`TIER 1 CACHE FALLBACK: trying legacy cache with resolved SymbolInfo...`);
+        try {
+          const cachedByKey = await this._cache.read(staticSymbol);
+          if (cachedByKey && !cachedByKey.metadata.stale && cachedByKey.metadata.llmProvider) {
+            const elapsed = Date.now() - startTime;
+            logger.logLLMStep(
+              `TIER 1 LEGACY CACHE HIT — found cached analysis via SymbolInfo key. ` +
+                `Provider: ${cachedByKey.metadata.llmProvider}, ` +
+                `Resolved in ${elapsed}ms — no LLM call needed.`
+            );
+            this._fireAnalysisComplete(cachedByKey);
+            return { symbol: staticSymbol, result: cachedByKey };
+          }
+        } catch {
+          // Legacy cache read error — continue
+        }
 
-      if (this._workspaceRoot) {
-        // Use the LLM-assisted fallback path (includes findByCursor as first step)
-        cached = await this._cache.findByCursorWithLLMFallback(cursor, this._workspaceRoot);
-      } else {
-        // No workspace root available — use basic findByCursor only
-        cached = await this._cache.findByCursor(cursor.word, cursor.filePath, cursor.position.line);
-      }
-
-      if (cached && !cached.result.metadata.stale && cached.result.metadata.llmProvider) {
-        const elapsed = Date.now() - startTime;
-        const fallbackUsed = this._workspaceRoot ? ' (with LLM fallback available)' : '';
         logger.logLLMStep(
-          `TIER 3 HIT${fallbackUsed} — found cached ${cached.symbol.kind} "${cached.symbol.name}" ` +
-            `at line ${cached.symbol.position.line}. ` +
-            `Provider: ${cached.result.metadata.llmProvider}, ` +
-            `analyzed at: ${cached.result.metadata.analyzedAt}. ` +
-            `Resolved in ${elapsed}ms — skipping LLM call.`
+          `TIER 1 CACHE MISS — no cached analysis for address "${address}". Will proceed to LLM.`
         );
-        logger.info(
-          `Orchestrator: TIER 3 HIT for "${cursor.word}" — ` +
-            `matched ${cached.symbol.kind} "${cached.symbol.name}" ` +
-            `(provider: ${cached.result.metadata.llmProvider}). No LLM call needed.`
+        missedAddresses.push(address);
+      } else {
+        logger.logLLMStep(
+          `TIER 1 MISS — VS Code static analysis could not resolve symbol ` +
+            `(result: ${staticSymbol ? staticSymbol.kind : 'null'}). Falling through to Tier 2.`
         );
-        // Promote the cache file so missed address-based lookups work next time
-        if (missedAddresses.length > 0) {
-          for (const missedAddr of missedAddresses) {
-            try {
-              await this._cache.promoteToAddress(missedAddr, cached.symbol);
-            } catch (promoteErr) {
-              logger.debug(
-                `Orchestrator: promoteToAddress failed for "${missedAddr}": ${promoteErr}`
-              );
+      }
+
+      // 2. TIER 2: Try tree-sitter symbol index if available
+      if (this._symbolIndex) {
+        logger.logLLMStep(
+          `TIER 2: tree-sitter index — resolving cursor at ${cursor.filePath}:${cursor.position.line}...`
+        );
+        const indexEntry = this._symbolIndex.resolveAtCursor(
+          cursor.filePath,
+          cursor.position.line,
+          cursor.position.character
+        );
+        if (indexEntry) {
+          logger.logLLMStep(
+            `TIER 2 HIT: tree-sitter resolved "${indexEntry.name}" ` +
+              `(${indexEntry.kind}) at address="${indexEntry.address}"`
+          );
+          const indexSymbol: SymbolInfo = {
+            name: indexEntry.name,
+            kind: indexEntry.kind,
+            filePath: indexEntry.filePath,
+            position: { line: indexEntry.startLine, character: indexEntry.startColumn },
+            scopeChain: indexEntry.scopeChain,
+          };
+
+          const cachedByAddress = await this._cache.readByAddress(indexEntry.address, indexSymbol);
+          if (
+            cachedByAddress &&
+            !cachedByAddress.metadata.stale &&
+            cachedByAddress.metadata.llmProvider
+          ) {
+            const elapsed = Date.now() - startTime;
+            logger.logLLMStep(
+              `TIER 2 CACHE HIT — address "${indexEntry.address}" resolved in ${elapsed}ms.`
+            );
+            this._fireAnalysisComplete(cachedByAddress);
+            return { symbol: indexSymbol, result: cachedByAddress };
+          }
+          logger.logLLMStep(`TIER 2 CACHE MISS — no cache for "${indexEntry.address}".`);
+          missedAddresses.push(indexEntry.address);
+        } else {
+          logger.logLLMStep(
+            `TIER 2 MISS — tree-sitter index has no entry at this cursor position.`
+          );
+        }
+      }
+
+      // 3. TIER 3: Legacy fuzzy cache scan (name + ±3 lines) — kept as fallback
+      logger.logLLMStep(
+        `TIER 3: Legacy fuzzy cache scan — symbol="${cursor.word}" ` +
+          `near line ${cursor.position.line} in ${cursor.filePath}...`
+      );
+      try {
+        let cached: { symbol: SymbolInfo; result: AnalysisResult } | null = null;
+
+        if (this._workspaceRoot) {
+          // Use the LLM-assisted fallback path (includes findByCursor as first step)
+          cached = await this._cache.findByCursorWithLLMFallback(cursor, this._workspaceRoot);
+        } else {
+          // No workspace root available — use basic findByCursor only
+          cached = await this._cache.findByCursor(
+            cursor.word,
+            cursor.filePath,
+            cursor.position.line
+          );
+        }
+
+        if (cached && !cached.result.metadata.stale && cached.result.metadata.llmProvider) {
+          const elapsed = Date.now() - startTime;
+          const fallbackUsed = this._workspaceRoot ? ' (with LLM fallback available)' : '';
+          logger.logLLMStep(
+            `TIER 3 HIT${fallbackUsed} — found cached ${cached.symbol.kind} "${cached.symbol.name}" ` +
+              `at line ${cached.symbol.position.line}. ` +
+              `Provider: ${cached.result.metadata.llmProvider}, ` +
+              `analyzed at: ${cached.result.metadata.analyzedAt}. ` +
+              `Resolved in ${elapsed}ms — skipping LLM call.`
+          );
+          logger.info(
+            `Orchestrator: TIER 3 HIT for "${cursor.word}" — ` +
+              `matched ${cached.symbol.kind} "${cached.symbol.name}" ` +
+              `(provider: ${cached.result.metadata.llmProvider}). No LLM call needed.`
+          );
+          // Promote the cache file so missed address-based lookups work next time
+          if (missedAddresses.length > 0) {
+            for (const missedAddr of missedAddresses) {
+              try {
+                await this._cache.promoteToAddress(missedAddr, cached.symbol);
+              } catch (promoteErr) {
+                logger.debug(
+                  `Orchestrator: promoteToAddress failed for "${missedAddr}": ${promoteErr}`
+                );
+              }
             }
           }
+
+          this._fireAnalysisComplete(cached.result);
+          return cached;
+        } else if (cached && cached.result.metadata.stale) {
+          logger.logLLMStep(
+            `TIER 3 FOUND but STALE — found cached "${cached.symbol.name}" but metadata.stale=true. ` +
+              `Will re-analyze with LLM.`
+          );
+        } else if (cached && !cached.result.metadata.llmProvider) {
+          logger.logLLMStep(
+            `TIER 3 FOUND but NO LLM DATA — found cached "${cached.symbol.name}" ` +
+              `but no llmProvider (static-only). Will analyze with LLM.`
+          );
+        } else {
+          logger.logLLMStep(
+            `TIER 3 MISS (cursor scan + LLM fallback) — no matching cache file found ` +
+              `for symbol="${cursor.word}" near line ${cursor.position.line}. ` +
+              `Will run full LLM analysis.`
+          );
         }
-
-        this._fireAnalysisComplete(cached.result);
-        return cached;
-      } else if (cached && cached.result.metadata.stale) {
-        logger.logLLMStep(
-          `TIER 3 FOUND but STALE — found cached "${cached.symbol.name}" but metadata.stale=true. ` +
-            `Will re-analyze with LLM.`
-        );
-      } else if (cached && !cached.result.metadata.llmProvider) {
-        logger.logLLMStep(
-          `TIER 3 FOUND but NO LLM DATA — found cached "${cached.symbol.name}" ` +
-            `but no llmProvider (static-only). Will analyze with LLM.`
-        );
-      } else {
-        logger.logLLMStep(
-          `TIER 3 MISS (cursor scan + LLM fallback) — no matching cache file found ` +
-            `for symbol="${cursor.word}" near line ${cursor.position.line}. ` +
-            `Will run full LLM analysis.`
-        );
+      } catch (err) {
+        logger.logLLMStep(`TIER 3 ERROR during cursor scan: ${err}. Treating as cache miss.`);
+        logger.debug(`Orchestrator: cache findByCursorWithLLMFallback error: ${err}`);
       }
-    } catch (err) {
-      logger.logLLMStep(`TIER 3 ERROR during cursor scan: ${err}. Treating as cache miss.`);
-      logger.debug(`Orchestrator: cache findByCursorWithLLMFallback error: ${err}`);
-    }
-
     } // end if (!force) — cache tiers
 
     // 2. Build unified prompt (resolution + analysis in one call)

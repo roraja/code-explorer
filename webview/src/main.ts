@@ -254,7 +254,9 @@ function renderTabBar(): string {
   // Investigation header
   const invName = currentNavHistory?.currentInvestigationName || 'Untitled Investigation';
   const isDirty = currentNavHistory?.currentInvestigationDirty ?? false;
-  const dirtyIndicator = isDirty ? '<span class="inv-header__dirty" title="Unsaved changes">*</span>' : '';
+  const dirtyIndicator = isDirty
+    ? '<span class="inv-header__dirty" title="Unsaved changes">*</span>'
+    : '';
 
   const invHeader = `<div class="inv-header">
     <div class="inv-header__name-row">
@@ -1361,7 +1363,7 @@ function _attachDragAndDrop(): void {
       if (de.dataTransfer) {
         de.dataTransfer.dropEffect = 'move';
       }
-      const target = (de.currentTarget as HTMLElement);
+      const target = de.currentTarget as HTMLElement;
       const rect = target.getBoundingClientRect();
       const midY = rect.top + rect.height / 2;
       // Remove indicators from siblings

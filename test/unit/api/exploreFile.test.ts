@@ -76,7 +76,9 @@ suite('CodeExplorerAPI.exploreFile', () => {
     });
     assert.ok(methodResult, 'Expected cache hit for getUser method');
     assert.strictEqual(methodResult!.symbol.kind, 'method');
-    assert.ok(methodResult!.overview.includes('getUser') || methodResult!.overview.includes('user'));
+    assert.ok(
+      methodResult!.overview.includes('getUser') || methodResult!.overview.includes('user')
+    );
   });
 
   test('progress callback is called', async () => {

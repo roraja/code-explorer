@@ -58,9 +58,7 @@ export class LLMProviderFactory {
       }
       case 'mock-copilot': {
         const mockOpts = mockCopilotOptions || {};
-        logger.info(
-          `Using mock-copilot LLM provider (delay=${mockOpts.delayMs ?? 3000}ms)`
-        );
+        logger.info(`Using mock-copilot LLM provider (delay=${mockOpts.delayMs ?? 3000}ms)`);
         return new MockCopilotProvider({
           delayMs: mockOpts.delayMs,
           extensionRoot: mockOpts.extensionRoot,

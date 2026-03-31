@@ -120,10 +120,7 @@ suite('MockCopilotProvider', () => {
       const result = await provider.analyze({ prompt });
 
       // The mock echoes a preview of the prompt
-      assert.ok(
-        result.includes('Analyze the function calculateSum'),
-        'should echo prompt content'
-      );
+      assert.ok(result.includes('Analyze the function calculateSum'), 'should echo prompt content');
     });
 
     test('includes timestamp in response', async () => {
@@ -141,10 +138,7 @@ suite('MockCopilotProvider', () => {
       provider.setDelayMs(0);
       const result = await provider.analyze({ prompt: 'test prompt' });
 
-      assert.ok(
-        result.includes('json:symbol_identity'),
-        'should include symbol_identity block'
-      );
+      assert.ok(result.includes('json:symbol_identity'), 'should include symbol_identity block');
     });
 
     test('includes json:steps block', async () => {
@@ -199,10 +193,7 @@ suite('MockCopilotProvider', () => {
       const elapsed = Date.now() - startTime;
 
       // Allow generous margin for process startup + CI variance
-      assert.ok(
-        elapsed >= 150,
-        `Expected at least ~200ms delay, got ${elapsed}ms`
-      );
+      assert.ok(elapsed >= 150, `Expected at least ~200ms delay, got ${elapsed}ms`);
     });
 
     test('responds quickly with delay=0', async () => {
@@ -212,10 +203,7 @@ suite('MockCopilotProvider', () => {
       const elapsed = Date.now() - startTime;
 
       // With 0 delay, should complete reasonably fast (process startup overhead)
-      assert.ok(
-        elapsed < 5000,
-        `Expected fast response with delay=0, got ${elapsed}ms`
-      );
+      assert.ok(elapsed < 5000, `Expected fast response with delay=0, got ${elapsed}ms`);
     });
   });
 });

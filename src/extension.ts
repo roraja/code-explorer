@@ -356,13 +356,9 @@ export function activate(context: vscode.ExtensionContext): void {
           },
           async (progress) => {
             try {
-              const cachedCount = await api.exploreFile(
-                filePath,
-                fileSource,
-                (stage, detail) => {
-                  progress.report({ message: detail || stage });
-                }
-              );
+              const cachedCount = await api.exploreFile(filePath, fileSource, (stage, detail) => {
+                progress.report({ message: detail || stage });
+              });
 
               if (cachedCount > 0) {
                 vscode.window.showInformationMessage(

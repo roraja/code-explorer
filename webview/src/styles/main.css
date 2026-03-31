@@ -210,6 +210,19 @@ body {
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
 }
 
+.tab__position {
+  font-size: 10px;
+  min-width: 14px;
+  text-align: center;
+  opacity: 0.5;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.tab--active .tab__position {
+  opacity: 0.8;
+}
+
 .tab__icon {
   font-size: 12px;
   opacity: 0.8;

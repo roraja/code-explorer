@@ -293,7 +293,7 @@ function renderTabBar(): string {
     : currentTabs;
 
   const tabs = filteredTabs
-    .map((tab) => {
+    .map((tab, index) => {
       const active = tab.id === currentActiveTabId ? ' tab--active' : '';
       const icon = kindIcon(tab.symbol.kind);
       const statusDot =
@@ -307,7 +307,9 @@ function renderTabBar(): string {
         tab.symbol.scopeChain && tab.symbol.scopeChain.length > 0
           ? tab.symbol.scopeChain[tab.symbol.scopeChain.length - 1] + ' \u203A '
           : '';
+      const position = index + 1;
       return `<div class="tab${active}" data-tab-id="${tab.id}" draggable="true">
+        <span class="tab__position">${position}</span>
         <span class="tab__icon">${icon}</span>
         <span class="tab__label" title="${esc((tab.symbol.scopeChain || []).concat(tab.symbol.name).join('.'))}">${esc(scope)}${esc(tab.symbol.name)}</span>
         ${statusDot}

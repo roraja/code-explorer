@@ -711,9 +711,7 @@ export interface ExplorerState {
  * A node in the tab group tree. Can be either a tab reference or a named group
  * containing other nodes (tabs or nested groups).
  */
-export type TabTreeNode =
-  | { type: 'tab'; tabId: string }
-  | { type: 'group'; group: TabGroup };
+export type TabTreeNode = { type: 'tab'; tabId: string } | { type: 'group'; group: TabGroup };
 
 /**
  * A named group of tabs that can be nested.
@@ -810,7 +808,12 @@ export type WebviewToExtensionMessage =
   | { type: 'deleteGroup'; groupId: string }
   | { type: 'toggleGroupCollapse'; groupId: string }
   | { type: 'moveToGroup'; tabIds: string[]; groupId: string | null; insertIndex?: number }
-  | { type: 'moveGroupToGroup'; sourceGroupId: string; targetGroupId: string | null; insertIndex?: number }
+  | {
+      type: 'moveGroupToGroup';
+      sourceGroupId: string;
+      targetGroupId: string | null;
+      insertIndex?: number;
+    }
   | { type: 'ungroupTabs'; tabIds: string[] };
 
 // =====================

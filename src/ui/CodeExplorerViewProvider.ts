@@ -707,7 +707,9 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
       }
 
       case 'createGroup': {
-        logger.info(`ViewProvider: createGroup "${message.name}" with ${message.tabIds.length} tabs`);
+        logger.info(
+          `ViewProvider: createGroup "${message.name}" with ${message.tabIds.length} tabs`
+        );
         this._createGroup(message.name, message.tabIds);
         break;
       }
@@ -1514,11 +1516,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
    * Move tabs into a group (or to ungrouped if groupId is null).
    * Removes tabs from any existing group first.
    */
-  private _moveTabsToGroup(
-    tabIds: string[],
-    groupId: string | null,
-    insertIndex?: number
-  ): void {
+  private _moveTabsToGroup(tabIds: string[], groupId: string | null, insertIndex?: number): void {
     // Remove tabs from their current groups
     for (const tabId of tabIds) {
       this._removeTabFromAllGroups(tabId);
@@ -1625,9 +1623,7 @@ export class CodeExplorerViewProvider implements vscode.WebviewViewProvider {
    */
   private _removeTabFromAllGroups(tabId: string, groups?: TabGroup[]): void {
     for (const g of groups ?? this._tabGroups) {
-      g.children = g.children.filter(
-        (child) => !(child.type === 'tab' && child.tabId === tabId)
-      );
+      g.children = g.children.filter((child) => !(child.type === 'tab' && child.tabId === tabId));
       for (const child of g.children) {
         if (child.type === 'group') {
           this._removeTabFromAllGroups(tabId, [child.group]);

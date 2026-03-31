@@ -61,9 +61,7 @@ interface NavigationHistoryState {
 }
 
 /** A node in the tab group tree (tab reference or nested group) */
-type TabTreeNode =
-  | { type: 'tab'; tabId: string }
-  | { type: 'group'; group: TabGroup };
+type TabTreeNode = { type: 'tab'; tabId: string } | { type: 'group'; group: TabGroup };
 
 /** Named group of tabs — supports nesting */
 interface TabGroup {
@@ -1495,9 +1493,19 @@ function _attachDragAndDrop(): void {
 
   // Clear all drop indicators
   const _clearDropIndicators = (): void => {
-    tabList.querySelectorAll('.tab--drop-above, .tab--drop-below, .tab-group--drop-into, .tab-group--drop-above, .tab-group--drop-below').forEach((t) => {
-      t.classList.remove('tab--drop-above', 'tab--drop-below', 'tab-group--drop-into', 'tab-group--drop-above', 'tab-group--drop-below');
-    });
+    tabList
+      .querySelectorAll(
+        '.tab--drop-above, .tab--drop-below, .tab-group--drop-into, .tab-group--drop-above, .tab-group--drop-below'
+      )
+      .forEach((t) => {
+        t.classList.remove(
+          'tab--drop-above',
+          'tab--drop-below',
+          'tab-group--drop-into',
+          'tab-group--drop-above',
+          'tab-group--drop-below'
+        );
+      });
   };
 
   // --- Tab drag-and-drop ---
@@ -1642,7 +1650,11 @@ function _attachDragAndDrop(): void {
       const target = (e as DragEvent).currentTarget as HTMLElement;
       const groupContainer = target.closest('.tab-group');
       if (groupContainer) {
-        groupContainer.classList.remove('tab-group--drop-into', 'tab-group--drop-above', 'tab-group--drop-below');
+        groupContainer.classList.remove(
+          'tab-group--drop-into',
+          'tab-group--drop-above',
+          'tab-group--drop-below'
+        );
       }
     });
 
@@ -1666,9 +1678,10 @@ function _attachDragAndDrop(): void {
       if (_draggedTabId) {
         if (dropInto) {
           // Tab dropped INTO a group
-          const tabIds = _selectedTabIds.size > 0 && _selectedTabIds.has(_draggedTabId)
-            ? Array.from(_selectedTabIds)
-            : [_draggedTabId];
+          const tabIds =
+            _selectedTabIds.size > 0 && _selectedTabIds.has(_draggedTabId)
+              ? Array.from(_selectedTabIds)
+              : [_draggedTabId];
           vscode.postMessage({
             type: 'moveToGroup',
             tabIds,
@@ -1740,9 +1753,10 @@ function _attachDragAndDrop(): void {
       }
 
       if (_draggedTabId) {
-        const tabIds = _selectedTabIds.size > 0 && _selectedTabIds.has(_draggedTabId)
-          ? Array.from(_selectedTabIds)
-          : [_draggedTabId];
+        const tabIds =
+          _selectedTabIds.size > 0 && _selectedTabIds.has(_draggedTabId)
+            ? Array.from(_selectedTabIds)
+            : [_draggedTabId];
         vscode.postMessage({ type: 'moveToGroup', tabIds, groupId });
         _selectedTabIds.clear();
       } else if (_draggedGroupId && _draggedGroupId !== groupId) {
